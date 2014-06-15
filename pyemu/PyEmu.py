@@ -17,7 +17,6 @@ PyEmu:
     for controlling the emulator.  This includes handlers, and initialization.
 '''
 
-import os
 import re
 import struct
 import sys

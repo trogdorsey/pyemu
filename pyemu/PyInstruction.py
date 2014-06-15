@@ -10,15 +10,16 @@
 #
 ########################################################################
 
+
 import pydasm
 
-'''
-PyOperand:
+class PyOperand(object):
+    '''
+    PyOperand:
 
-    Stores information about a single operand.  We duplicate pydasm
-    information in case one day we want to replace it.
-'''
-class PyOperand:
+        Stores information about a single operand.  We duplicate pydasm
+        information in case one day we want to replace it.
+    '''
     def __init__(self, operand):
         self.optype = operand.type
         self.reg = operand.reg
@@ -35,14 +36,14 @@ class PyOperand:
         self.immediate = operand.immediate
         self.flags = operand.flags
 
-'''
-PyInstruction:
+class PyInstruction(object):
+    '''
+    PyInstruction:
 
-    Contains information about each instruction including opcode and
-    operands.  We duplicate pydasm information in case one day we want
-    to replace it.
-'''
-class PyInstruction:
+        Contains information about each instruction including opcode and
+        operands.  We duplicate pydasm information in case one day we want
+        to replace it.
+    '''
     def __init__(self, instruction, rawinstruction, eip):
         self.length = instruction.length
         self.type = instruction.type
