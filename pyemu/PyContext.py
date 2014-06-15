@@ -16,7 +16,7 @@ PyContext:
     A simple class that provides a method for passing full context
     information.
 '''
-class PyContext:
+class PyContext(object):
     def __init__(self):
         self.dr0 = 0x0
         self.dr1 = 0x0
@@ -24,15 +24,15 @@ class PyContext:
         self.dr3 = 0x0
         self.dr6 = 0x0
         self.dr7 = 0x0
-        
+
         self.GS = 0x0
         self.FS = 0x0
         self.ES = 0x0
         self.DS = 0x0
-        
+
         self.CS = 0x0
         self.SS = 0x0
-        
+
         self.EAX = 0x0
         self.ECX = 0x0
         self.EDX = 0x0
@@ -41,6 +41,7 @@ class PyContext:
         self.EBP = 0x0
         self.ESI = 0x0
         self.EDI = 0x0
-        
+
         self.EFLAGS = 0x0
         self.EIP = 0x0
+

@@ -37,8 +37,8 @@ def DebugDumpFlags(flags):
                   "AC": 18,
                   "VIF": 19,
                   "VIP": 20,
-                  "ID": 21 }
-    
+                  "ID": 21}
+
     for flag in eflags_map.keys():
         if (flags >> eflags_map[flag]) & 0x1:
             print flag,
