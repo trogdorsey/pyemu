@@ -10,12 +10,11 @@
 #
 ########################################################################
 
-import sys, os, time, struct, re
-
-sys.path.append("lib")
-sys.path.append(r'C:\Program Files\IDA\python')
-
-import pydasm
+import os
+import re
+import struct
+import sys
+import time
 
 from PyCPU import PyCPU
 from PyContext import PyContext
@@ -25,7 +24,7 @@ from PyOS import *
 '''
 PyEmu:
 
-    This main emulator class.  This class implements the public methods
+    The main emulator class.  This class implements the public methods
     for controlling the emulator.  This includes handlers, and initialization.
 '''
 class PyEmu:
@@ -49,7 +48,7 @@ class PyEmu:
         self.heap_size = 0x0
         
         # Holds an instance of our PyMemory class
-        self.memory = ""
+        self.memory = None
         
         # A list of names for public methods
         self.register_names = {}
@@ -68,7 +67,10 @@ class PyEmu:
         self.memory_read_handler = None
         self.memory_write_handler = None
         self.memory_access_handler = None
-        
+
+        self.instruction_parsed_handle = None
+        self.instruction_executed_handle = None
+
         self.stack_read_handler = None
         self.stack_write_handler = None
         self.stack_access_handler = None
@@ -81,11 +83,11 @@ class PyEmu:
         self.cpu = PyCPU(self)
         
         # Determine which os we are on to instantiate the proper PyOS
-        if os.name == 'nt':
-            self.os = PyWindows()
-        elif os.name == 'posix':
-            # Yea I realize
-            self.os = PyLinux()
+        #if os.name == 'nt':
+        #    self.os = PyWindows()
+        #elif os.name == 'posix':
+        #    # Yea I realize
+        #    self.os = PyLinux()
 
     #
     # raise_exception: This method gets called when an exception happens
@@ -126,11 +128,10 @@ class PyEmu:
     # execute: A public method for executing instructions
     #
     def execute(self, steps=1, start=0x0, end=0x0):
-        if not isinstance(steps, int) or not isinstance(start, int) or not isinstance(end, int):
-            return False
-
+        
         # If we are called we are emulating
         self.emulating = True
+        self.cpu.counts = {}
         
         # Set the instruction pointer to the user supplied address
         if start:
@@ -143,28 +144,26 @@ class PyEmu:
                     if not self.emulating: return False
                     
                     if not self.cpu.execute():
-                        print "[!] Problem executing"
-                        
                         return False
-
                     steps -= 1
             else:
                 while self.cpu.get_register32("EIP") != end:
                     if not self.emulating: return False
-                    
+                         
                     if not self.cpu.execute():
-                        print "[!] Problem executing"
-                        
                         return False
         else:
-            for x in range(steps):
-                if not self.emulating: return False
-                
-                if not self.cpu.execute():
-                    print "[!] Problem executing"
+            if steps >= 1:
+                for x in range(steps):
+                    if not self.emulating: return False
                     
-                    return False
-
+                    if not self.cpu.execute():
+                        return False
+            else:
+                while self.emulating:
+                    if not self.cpu.execute():
+                        return False
+                        
         return True
     
     #
@@ -203,7 +202,6 @@ class PyEmu:
                 
             else:    
                 print "[!] Couldnt determine register"
-                
                 return False
             
         return result
@@ -279,7 +277,7 @@ class PyEmu:
         else:
             if name in self.register_names:
                 # Try and set the register
-                if not self.cpu.set_register(self.register_names[name]["name"], self.register_names[name]["size"]):
+                if not self.cpu.set_register(self.register_names[name]["name"], value, self.register_names[name]["size"]):
                     print "[!] Problem setting register"
                 
                     return False
@@ -497,6 +495,22 @@ class PyEmu:
         return self.os.get_selector(selector)
 
     #
+    # set_instruction_parsed_handler: A public method setting a custom handler
+    # for when an instruction is successfully parsed
+    #
+    def set_instruction_parsed_handler(self, handler):
+        self.instruction_parsed_handler = handler
+        return True
+
+    #
+    # set_instruction_executed_handler: A public method setting a custom handler
+    # for when an instruction is successfully executed
+    #
+    def set_instruction_executed_handler(self, handler):
+        self.instruction_executed_handler = handler
+        return True
+
+    #
     # set_register_handler: A public method for setting a custom register
     #                       handler.  This allows trapping register touches
     #
@@ -599,7 +613,7 @@ class PyEmu:
     #
     def set_interrupt_handler(self, interrupt, handler):
         # We only allow int values
-        if not isinstance(exception, int) and not isinstance(exception, long):
+        if not isinstance(interrupt, int) and not isinstance(interrupt, long):
             print "[!] Cant understand interrupt of type %s" % type(interrupt)
             
             return False
@@ -720,7 +734,7 @@ class PyEmu:
         self.cpu.dump_regs()
     
     #
-    # dump_stack: A public method to dump the stack from EBP
+    # dump_stack: A public method to dump the stack from ESP and EBP
     #
     def dump_stack(self, count=64):
         self.cpu.dump_stack(count)
@@ -857,6 +871,13 @@ class PEPyEmu(PyEmu):
      
         PyEmu.__init__(self)
    
+        # PE Specific information
+        self.entry_point = None
+        self.image_base = None
+        self.code_base = None
+        self.data_base = None
+        self.sections = {}
+        
         # Store memory limit information
         self.stack_base = stack_base
         self.stack_size = stack_size
@@ -905,4 +926,83 @@ class PEPyEmu(PyEmu):
         self.cpu.FS = 0x003b
         self.cpu.GS = 0x0000
         
+        return True
+
+    #
+    # load: Loads the sections of a binary into the emulator memory
+    #       if you need more control over the loading do it in your
+    #       script ignoring this method.
+    #
+    def load(self, exename):
+        try:
+            import pefile
+        except ImportError:
+            print "[!] Couldnt import pefile"
+            return False
+            
+        # Instantiate our pefile object
+        pe = pefile.PE(exename)
+        
+        self.image_base = pe.OPTIONAL_HEADER.ImageBase
+        self.code_base = pe.OPTIONAL_HEADER.ImageBase + pe.OPTIONAL_HEADER.BaseOfCode
+        self.data_base = pe.OPTIONAL_HEADER.ImageBase + pe.OPTIONAL_HEADER.BaseOfData
+        self.entry_point = pe.OPTIONAL_HEADER.ImageBase + pe.OPTIONAL_HEADER.AddressOfEntryPoint
+        
+        if self.DEBUG > 1:
+            print "[*] Image Base Addr:  0x%08x" % (self.image_base)
+            print "[*] Code Base Addr:   0x%08x" % (self.code_base)
+            print "[*] Data Base Addr:   0x%08x" % (self.data_base)
+            print "[*] Entry Point Addr: 0x%08x\n" % (self.entry_point)
+        
+        # I need to load the image header first
+        headerlen = len(pe.header)
+        
+        if self.DEBUG > 1:
+            print "[*] Loading header of size %x at %x" % (headerlen, self.image_base)
+            
+        for x in range(headerlen):
+            c = pe.header[x]
+            self.set_memory(self.image_base + x, int(ord(c)), size=1)
+        
+        # We loop through the sections in our binary returning a list of info    
+        for section in pe.sections:
+            if self.DEBUG > 1:
+                print "[*] Loading [%s] data into memory" % section.Name.strip('\x00')
+        
+            # Get our section address base
+            sectionbase = self.image_base + section.VirtualAddress
+            virtualsize = section.Misc_VirtualSize
+            sectiondata = section.data
+            sectiondatalen = len(sectiondata)
+            
+            if self.DEBUG > 1:
+                print "[*] Base Addr: 0x%08x (vsize: %08x  dsize: %08x)" % (sectionbase, virtualsize, sectiondatalen)
+            
+            # Grab our data bytes from the section
+            for x in range(sectiondatalen):
+                c = section.data[x]
+                self.set_memory(sectionbase + x, int(ord(c)), size=1)
+            
+            # if we have a section without data lets fill nulls
+            for x in range(virtualsize - sectiondatalen):
+                c = "\x00"
+                self.set_memory(sectionbase + x + sectiondatalen, c, size=1)
+            
+            # append our section to the class list so the user can access it
+            self.sections[section.Name.strip('\x00')] = {"base": sectionbase, "vsize": virtualsize, "dsize": sectiondatalen}
+            #sys.exit()
+        # We must load import directory
+        for entry in pe.DIRECTORY_ENTRY_IMPORT:
+            if self.DEBUG > 1:
+                print "[*] Adding import from %s" % entry.dll
+                
+            for imp in entry.imports:
+                if self.DEBUG > 1:
+                    print '[*]  0x%08x [%20s]' % (imp.address, imp.name)
+                
+                self.os.add_library(entry.dll, imp.name)
+                import_address = self.os.get_library_address(imp.name)
+                if import_address:
+                    self.set_memory(imp.address, import_address, size=4)
+
         return True

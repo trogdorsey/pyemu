@@ -74,22 +74,46 @@ class PyWindows:
         return True
     
     #
+    # add_fake_library: Handles addition of libraries that you wont load
+    #                   like in the case of IDAPyEmu
+    #
+    def add_fake_library(self, function, address):
+        for library in self.libraries:
+            if function == self.libraries[library]['name']:
+                return True
+        
+        
+        if self.DEBUG >= 1:
+            print "[*] Adding fake library %s address 0x%08x" % (function, address)
+        
+        self.libraries[address] = {'address': address, 'name': function}
+        
+        return True
+        
+    #
     # add_library: Handles addition of libraries to the OS.  This lets us
     #              call any user handlers when we call into this function
     #
-    def add_library(self, dllname, function):
+    def add_library(self, dll, function):
         for library in self.libraries:
             if function == self.libraries[library]['name']:
                 return True
 
-        handle  = windll.kernel32.LoadLibraryA(dllname)
-        address = windll.kernel32.GetProcAddress(handle, function)
-        windll.kernel32.FreeLibrary(handle)
+        # Grab a handle if we dont have it based on the dll name
+        if isinstance(dll, str):
+            handle  = windll.kernel32.LoadLibraryA(dll)
+            address = windll.kernel32.GetProcAddress(handle, function)
+        elif isinstance(dll, long) or isinstance(dll, int):
+            handle = dll
+            address = windll.kernel32.GetProcAddress(handle, function)
+        else:
+            print "[!] Dont understand dll"
+            return False
+                
+        if self.DEBUG >= 1:
+            print "[*] Adding library %s address 0x%08x" % (function, address)
         
-        #if self.DEBUG >= 1:
-        print "[*] Adding library %s address 0x%08x" % (function, address)
-        
-        self.libraries[address] = {'dll': dllname, 'address': address, 'name': function}
+        self.libraries[address] = {'address': address, 'name': function}
         
         return True
     
@@ -125,7 +149,8 @@ class PyWindows:
     '''
     class __PEB:
         def __init__(self):
-            self.Address = 0x00000000
+            # I just chose this
+            self.Address = 0x7ffd9000
             
             # *not complete*
             self.InheritedAddressSpace = 0x0
@@ -387,13 +412,13 @@ class PyLinux:
     DEBUG = 0
     
     def __init__(self):
-        pass
+        self.libraries = {}
 
     #
     # initialize: called from the emulator to set up the environment this
     #             wont do anything...yet :(
     #
-    def initialize(self, stackbase, stacklimit, heapbase, heaplimit):
+    def initialize(self, emu, stackbase, stacklimit, heapbase, heaplimit):
         
         return True
     
