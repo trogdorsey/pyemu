@@ -10,10 +10,18 @@
 #
 ########################################################################
 
-import binascii
-import sys, os, time, struct, re
+'''
+PyCPU:
 
-sys.path.append("lib")
+    The heart of PyEmu.  The CPU class handles execution of instructions.
+'''
+
+import binascii
+import os
+import re
+import struct
+import sys
+import time
 
 import pydasm
 
@@ -22,12 +30,7 @@ from PyFlags import PyFlags
 from PyInstruction import *
 from PyDebug import *
 
-'''
-PyCPU:
-
-    The heart of PyEmu.  The CPU class handles execution of instructions.
-'''
-class PyCPU:
+class PyCPU(object):
     DEBUG = 0
 
     # Bitmap of eflags
@@ -47,10 +50,10 @@ class PyCPU:
                   "AC": 0x40000,
                   "VIF": 0x80000,
                   "VIP": 0x100000,
-                  "ID": 0x200000 }
-    
+                  "ID": 0x200000}
+
     def __init__(self, emu):
-                
+
         # We store the emu object so we can communicate and request info
         self.emu = emu
 
@@ -72,10 +75,10 @@ class PyCPU:
         self.FS = 0x0000
         self.ES = 0x0000
         self.DS = 0x0000
-        
+
         self.CS = 0x0000
         self.SS = 0x0000
-        
+
         self.CF = 0
         self.PF = 0
         self.AF = 0
@@ -99,263 +102,262 @@ class PyCPU:
         # We cache instructions as they execute for performance
         self.executed_instructions = {}
 
-
         # The function table of all the instructions supported.  I use a
         # mnemonic table instead of an opcode map to allow mnemonic handlers.
-        self.supported_instructions = { "aaa": lambda instruction: self.AAA(instruction),
-                                        "adc": lambda instruction: self.ADC(instruction),
-                                        "add": lambda instruction: self.ADD(instruction),
-                                        "and": lambda instruction: self.AND(instruction),
-                                        "bswap": lambda instruction: self.BSWAP(instruction),
-                                        "call": lambda instruction: self.CALL(instruction),
-                                        "cbw": lambda instruction: self.CBW(instruction),
-                                        "cdq": lambda instruction: self.CDQ(instruction),
-                                        "clc": lambda instruction: self.CLC(instruction),
-                                        "cld": lambda instruction: self.CLD(instruction),
-                                        "cmp": lambda instruction: self.CMP(instruction),
-                                        "cmps": lambda instruction: self.CMPS(instruction),
-                                        "cmpsb": lambda instruction: self.CMPSB(instruction),
-                                        "cmpsw": lambda instruction: self.CMPSW(instruction),
-                                        "cmpsd": lambda instruction: self.CMPSD(instruction),
-                                        "cwd": lambda instruction: self.CWD(instruction),
-                                        "dec": lambda instruction: self.DEC(instruction),
-                                        "div": lambda instruction: self.DIV(instruction),
-                                        "f2xm1": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fabs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fadd": lambda instruction: self.FLOATFAKE(instruction),
-                                        "faddl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "faddp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fadds": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fbld": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fbstp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fchs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fclex": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovb": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovbe": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmove": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovnb": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovnbe": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovne": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovnu": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcmovu": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcom": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcomi": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcomip": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcoml": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcomp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcompl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcompp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcoms": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcomps": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fcos": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdecstp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdiv": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivr": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivrp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fdivrs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ffree": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ffreep": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fiadd": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fiaddl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fiaddp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ficom": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ficoml": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ficomp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ficompl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fidiv": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fidivl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fidivr": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fidivrl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fild": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fildl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fimul": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fimull": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fincstp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "finit": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fist": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fistl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fistp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fisttp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fisub": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fisubl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fisubr": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fisubrl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fld": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fld1": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldenv": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldcw": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldl2e": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldl2t": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldlg2": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldln2": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldpi": lambda instruction: self.FLOATFAKE(instruction),
-                                        "flds": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldt": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fldz": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fmul": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fmull": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fmulp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fnop": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fnstenv": lambda instruction: self.FSTENV(instruction),
-                                        "fptan": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fpatan": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fprem": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fprem1": lambda instruction: self.FLOATFAKE(instruction),
-                                        "frndint": lambda instruction: self.FLOATFAKE(instruction),
-                                        "frstor": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsave": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fscale": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsin": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsincos": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsqrt": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fst": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fstcw": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fstenv": lambda instruction: self.FSTENV(instruction),
-                                        "fstl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fstp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fstpl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fstsw": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsub": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubr": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubrl": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubrp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubrs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fsubs": lambda instruction: self.FLOATFAKE(instruction),
-                                        "ftst": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fucom": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fucomi": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fucomip": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fucomp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fucompp": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fxam": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fxch": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fxtract": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fyl2x": lambda instruction: self.FLOATFAKE(instruction),
-                                        "fyl2xp1": lambda instruction: self.FLOATFAKE(instruction),
-                                        "idiv": lambda instruction: self.IDIV(instruction),
-                                        "imul": lambda instruction: self.IMUL(instruction),
-                                        "inc": lambda instruction: self.INC(instruction),
-                                        "int": lambda instruction: self.INT(instruction),
-                                        "int3": lambda instruction: self.INT(instruction),
-                                        "ja": lambda instruction: self.JA(instruction),
-                                        "jb": lambda instruction: self.JB(instruction),
-                                        "jbe": lambda instruction: self.JBE(instruction),
-                                        "jc": lambda instruction: self.JC(instruction),
-                                        "jecxz": lambda instruction: self.JECXZ(instruction),
-                                        "jg": lambda instruction: self.JG(instruction),
-                                        "jge": lambda instruction: self.JGE(instruction),
-                                        "jl": lambda instruction: self.JL(instruction),
-                                        "jle": lambda instruction: self.JLE(instruction),
-                                        "jmp": lambda instruction: self.JMP(instruction),
-                                        "jna": lambda instruction: self.JNA(instruction),
-                                        "jnb": lambda instruction: self.JNB(instruction),
-                                        "jnc": lambda instruction: self.JNC(instruction),
-                                        "jng": lambda instruction: self.JNG(instruction),
-                                        "jnl": lambda instruction: self.JNL(instruction),
-                                        "jns": lambda instruction: self.JNS(instruction),
-                                        "jnz": lambda instruction: self.JNZ(instruction),
-                                        "js": lambda instruction: self.JS(instruction),
-                                        "jz": lambda instruction: self.JZ(instruction),
-                                        "jp": lambda instruction: self.JP(instruction),
-                                        "jnp": lambda instruction: self.JNP(instruction),
-                                        "jpe": lambda instruction: self.JPE(instruction),
-                                        "jpo": lambda instruction: self.JPO(instruction),
-                                        "lea": lambda instruction: self.LEA(instruction),
-                                        "leave": lambda instruction: self.LEAVE(instruction),
-                                        "lodsb": lambda instruction: self.LODSB(instruction),
-                                        "lodsw": lambda instruction: self.LODSW(instruction),
-                                        "lodsd": lambda instruction: self.LODSD(instruction),
-                                        "loop": lambda instruction: self.LOOP(instruction),
-                                        "loope": lambda instruction: self.LOOPE(instruction),
-                                        "loopne": lambda instruction: self.LOOPNE(instruction),
-                                        "mov": lambda instruction: self.MOV(instruction),
-                                        "movs": lambda instruction: self.MOVS(instruction),
-                                        "movsb": lambda instruction: self.MOVSB(instruction),
-                                        "movsw": lambda instruction: self.MOVSW(instruction),
-                                        "movsd": lambda instruction: self.MOVSD(instruction),
-                                        "movsx": lambda instruction: self.MOVSX(instruction),
-                                        "movzx": lambda instruction: self.MOVZX(instruction),
-                                        "mul": lambda instruction: self.MUL(instruction),
-                                        "neg": lambda instruction: self.NEG(instruction),
-                                        "nop": lambda instruction: self.NOP(instruction),
-                                        "not": lambda instruction: self.NOT(instruction),
-                                        "or": lambda instruction: self.OR(instruction),
-                                        "pop": lambda instruction: self.POP(instruction),
-                                        "popa": lambda instruction: self.POPA(instruction),    
-                                        "popf": lambda instruction: self.POPF(instruction),    
-                                        "push": lambda instruction: self.PUSH(instruction),
-                                        "pusha": lambda instruction: self.PUSHA(instruction),
-                                        "pushf": lambda instruction: self.PUSHF(instruction),
-                                        "rcr": lambda instruction: self.RCR(instruction),
-                                        "rcl": lambda instruction: self.RCL(instruction),
-                                        "ret": lambda instruction: self.RET(instruction),
-                                        "retn": lambda instruction: self.RET(instruction),
-                                        "rol": lambda instruction: self.ROL(instruction),
-                                        "ror": lambda instruction: self.ROR(instruction),
-                                        "sal": lambda instruction: self.SAL(instruction),
-                                        "sar": lambda instruction: self.SAR(instruction),
-                                        "sbb": lambda instruction: self.SBB(instruction),
-                                        "scas": lambda instruction: self.SCAS(instruction),
-                                        "scasb": lambda instruction: self.SCASB(instruction),
-                                        "scasw": lambda instruction: self.SCASW(instruction),
-                                        "scasd": lambda instruction: self.SCASD(instruction),
-                                        "setna": lambda instruction: self.SETNA(instruction),
-                                        "setle": lambda instruction: self.SETLE(instruction),
-                                        "setge": lambda instruction: self.SETGE(instruction),
-                                        "setg": lambda instruction: self.SETG(instruction),
-                                        "sete": lambda instruction: self.SETE(instruction),
-                                        "setc": lambda instruction: self.SETC(instruction),
-                                        "setbe": lambda instruction: self.SETBE(instruction),
-                                        "setb": lambda instruction: self.SETB(instruction),
-                                        "setae": lambda instruction: self.SETAE(instruction),
-                                        "seta": lambda instruction: self.SETA(instruction),
-                                        "setps": lambda instruction: self.SETPS(instruction),
-                                        "setpo": lambda instruction: self.SETPO(instruction),
-                                        "setpe": lambda instruction: self.SETPE(instruction),
-                                        "setp": lambda instruction: self.SETP(instruction),
-                                        "seto": lambda instruction: self.SETO(instruction),
-                                        "setns": lambda instruction: self.SETNS(instruction),
-                                        "setnp": lambda instruction: self.SETNP(instruction),
-                                        "setno": lambda instruction: self.SETNO(instruction),
-                                        "setnl": lambda instruction: self.SETNL(instruction),
-                                        "setnge": lambda instruction: self.SETNGE(instruction),
-                                        "setng": lambda instruction: self.SETNG(instruction),
-                                        "setne": lambda instruction: self.SETNE(instruction),
-                                        "setnc": lambda instruction: self.SETNC(instruction),
-                                        "setnbe": lambda instruction: self.SETNBE(instruction),
-                                        "setnb": lambda instruction: self.SETNB(instruction),
-                                        "setnae": lambda instruction: self.SETNAE(instruction),
-                                        "setl": lambda instruction: self.SETL(instruction),
-                                        "setnle": lambda instruction: self.SETNLE(instruction),
-                                        "setnz": lambda instruction: self.SETNZ(instruction),
-                                        "setz": lambda instruction: self.SETZ(instruction),
-                                        "shl": lambda instruction: self.SHL(instruction),
-                                        "shr": lambda instruction: self.SHR(instruction),
-                                        "std": lambda instruction: self.STD(instruction),
-                                        "stos": lambda instruction: self.STOS(instruction),
-                                        "stosb": lambda instruction: self.STOSB(instruction),
-                                        "stosw": lambda instruction: self.STOSW(instruction),
-                                        "stosd": lambda instruction: self.STOSD(instruction),
-                                        "sub": lambda instruction: self.SUB(instruction),
-                                        "test": lambda instruction: self.TEST(instruction),
-                                        "xchg": lambda instruction: self.XCHG(instruction),
-                                        "xor": lambda instruction: self.XOR(instruction)}
+        self.supported_instructions = {"aaa": lambda instruction: self.AAA(instruction),
+                                       "adc": lambda instruction: self.ADC(instruction),
+                                       "add": lambda instruction: self.ADD(instruction),
+                                       "and": lambda instruction: self.AND(instruction),
+                                       "bswap": lambda instruction: self.BSWAP(instruction),
+                                       "call": lambda instruction: self.CALL(instruction),
+                                       "cbw": lambda instruction: self.CBW(instruction),
+                                       "cdq": lambda instruction: self.CDQ(instruction),
+                                       "clc": lambda instruction: self.CLC(instruction),
+                                       "cld": lambda instruction: self.CLD(instruction),
+                                       "cmp": lambda instruction: self.CMP(instruction),
+                                       "cmps": lambda instruction: self.CMPS(instruction),
+                                       "cmpsb": lambda instruction: self.CMPSB(instruction),
+                                       "cmpsw": lambda instruction: self.CMPSW(instruction),
+                                       "cmpsd": lambda instruction: self.CMPSD(instruction),
+                                       "cwd": lambda instruction: self.CWD(instruction),
+                                       "dec": lambda instruction: self.DEC(instruction),
+                                       "div": lambda instruction: self.DIV(instruction),
+                                       "f2xm1": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fabs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fadd": lambda instruction: self.FLOATFAKE(instruction),
+                                       "faddl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "faddp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fadds": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fbld": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fbstp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fchs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fclex": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovb": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovbe": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmove": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovnb": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovnbe": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovne": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovnu": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcmovu": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcom": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcomi": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcomip": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcoml": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcomp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcompl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcompp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcoms": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcomps": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fcos": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdecstp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdiv": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivr": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivrp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fdivrs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ffree": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ffreep": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fiadd": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fiaddl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fiaddp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ficom": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ficoml": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ficomp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ficompl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fidiv": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fidivl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fidivr": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fidivrl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fild": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fildl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fimul": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fimull": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fincstp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "finit": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fist": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fistl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fistp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fisttp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fisub": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fisubl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fisubr": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fisubrl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fld": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fld1": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldenv": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldcw": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldl2e": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldl2t": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldlg2": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldln2": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldpi": lambda instruction: self.FLOATFAKE(instruction),
+                                       "flds": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldt": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fldz": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fmul": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fmull": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fmulp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fnop": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fnstenv": lambda instruction: self.FSTENV(instruction),
+                                       "fptan": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fpatan": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fprem": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fprem1": lambda instruction: self.FLOATFAKE(instruction),
+                                       "frndint": lambda instruction: self.FLOATFAKE(instruction),
+                                       "frstor": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsave": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fscale": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsin": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsincos": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsqrt": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fst": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fstcw": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fstenv": lambda instruction: self.FSTENV(instruction),
+                                       "fstl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fstp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fstpl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fstsw": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsub": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubr": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubrl": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubrp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubrs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fsubs": lambda instruction: self.FLOATFAKE(instruction),
+                                       "ftst": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fucom": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fucomi": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fucomip": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fucomp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fucompp": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fxam": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fxch": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fxtract": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fyl2x": lambda instruction: self.FLOATFAKE(instruction),
+                                       "fyl2xp1": lambda instruction: self.FLOATFAKE(instruction),
+                                       "idiv": lambda instruction: self.IDIV(instruction),
+                                       "imul": lambda instruction: self.IMUL(instruction),
+                                       "inc": lambda instruction: self.INC(instruction),
+                                       "int": lambda instruction: self.INT(instruction),
+                                       "int3": lambda instruction: self.INT(instruction),
+                                       "ja": lambda instruction: self.JA(instruction),
+                                       "jb": lambda instruction: self.JB(instruction),
+                                       "jbe": lambda instruction: self.JBE(instruction),
+                                       "jc": lambda instruction: self.JC(instruction),
+                                       "jecxz": lambda instruction: self.JECXZ(instruction),
+                                       "jg": lambda instruction: self.JG(instruction),
+                                       "jge": lambda instruction: self.JGE(instruction),
+                                       "jl": lambda instruction: self.JL(instruction),
+                                       "jle": lambda instruction: self.JLE(instruction),
+                                       "jmp": lambda instruction: self.JMP(instruction),
+                                       "jna": lambda instruction: self.JNA(instruction),
+                                       "jnb": lambda instruction: self.JNB(instruction),
+                                       "jnc": lambda instruction: self.JNC(instruction),
+                                       "jng": lambda instruction: self.JNG(instruction),
+                                       "jnl": lambda instruction: self.JNL(instruction),
+                                       "jns": lambda instruction: self.JNS(instruction),
+                                       "jnz": lambda instruction: self.JNZ(instruction),
+                                       "js": lambda instruction: self.JS(instruction),
+                                       "jz": lambda instruction: self.JZ(instruction),
+                                       "jp": lambda instruction: self.JP(instruction),
+                                       "jnp": lambda instruction: self.JNP(instruction),
+                                       "jpe": lambda instruction: self.JPE(instruction),
+                                       "jpo": lambda instruction: self.JPO(instruction),
+                                       "lea": lambda instruction: self.LEA(instruction),
+                                       "leave": lambda instruction: self.LEAVE(instruction),
+                                       "lodsb": lambda instruction: self.LODSB(instruction),
+                                       "lodsw": lambda instruction: self.LODSW(instruction),
+                                       "lodsd": lambda instruction: self.LODSD(instruction),
+                                       "loop": lambda instruction: self.LOOP(instruction),
+                                       "loope": lambda instruction: self.LOOPE(instruction),
+                                       "loopne": lambda instruction: self.LOOPNE(instruction),
+                                       "mov": lambda instruction: self.MOV(instruction),
+                                       "movs": lambda instruction: self.MOVS(instruction),
+                                       "movsb": lambda instruction: self.MOVSB(instruction),
+                                       "movsw": lambda instruction: self.MOVSW(instruction),
+                                       "movsd": lambda instruction: self.MOVSD(instruction),
+                                       "movsx": lambda instruction: self.MOVSX(instruction),
+                                       "movzx": lambda instruction: self.MOVZX(instruction),
+                                       "mul": lambda instruction: self.MUL(instruction),
+                                       "neg": lambda instruction: self.NEG(instruction),
+                                       "nop": lambda instruction: self.NOP(instruction),
+                                       "not": lambda instruction: self.NOT(instruction),
+                                       "or": lambda instruction: self.OR(instruction),
+                                       "pop": lambda instruction: self.POP(instruction),
+                                       "popa": lambda instruction: self.POPA(instruction),
+                                       "popf": lambda instruction: self.POPF(instruction),
+                                       "push": lambda instruction: self.PUSH(instruction),
+                                       "pusha": lambda instruction: self.PUSHA(instruction),
+                                       "pushf": lambda instruction: self.PUSHF(instruction),
+                                       "rcr": lambda instruction: self.RCR(instruction),
+                                       "rcl": lambda instruction: self.RCL(instruction),
+                                       "ret": lambda instruction: self.RET(instruction),
+                                       "retn": lambda instruction: self.RET(instruction),
+                                       "rol": lambda instruction: self.ROL(instruction),
+                                       "ror": lambda instruction: self.ROR(instruction),
+                                       "sal": lambda instruction: self.SAL(instruction),
+                                       "sar": lambda instruction: self.SAR(instruction),
+                                       "sbb": lambda instruction: self.SBB(instruction),
+                                       "scas": lambda instruction: self.SCAS(instruction),
+                                       "scasb": lambda instruction: self.SCASB(instruction),
+                                       "scasw": lambda instruction: self.SCASW(instruction),
+                                       "scasd": lambda instruction: self.SCASD(instruction),
+                                       "setna": lambda instruction: self.SETNA(instruction),
+                                       "setle": lambda instruction: self.SETLE(instruction),
+                                       "setge": lambda instruction: self.SETGE(instruction),
+                                       "setg": lambda instruction: self.SETG(instruction),
+                                       "sete": lambda instruction: self.SETE(instruction),
+                                       "setc": lambda instruction: self.SETC(instruction),
+                                       "setbe": lambda instruction: self.SETBE(instruction),
+                                       "setb": lambda instruction: self.SETB(instruction),
+                                       "setae": lambda instruction: self.SETAE(instruction),
+                                       "seta": lambda instruction: self.SETA(instruction),
+                                       "setps": lambda instruction: self.SETPS(instruction),
+                                       "setpo": lambda instruction: self.SETPO(instruction),
+                                       "setpe": lambda instruction: self.SETPE(instruction),
+                                       "setp": lambda instruction: self.SETP(instruction),
+                                       "seto": lambda instruction: self.SETO(instruction),
+                                       "setns": lambda instruction: self.SETNS(instruction),
+                                       "setnp": lambda instruction: self.SETNP(instruction),
+                                       "setno": lambda instruction: self.SETNO(instruction),
+                                       "setnl": lambda instruction: self.SETNL(instruction),
+                                       "setnge": lambda instruction: self.SETNGE(instruction),
+                                       "setng": lambda instruction: self.SETNG(instruction),
+                                       "setne": lambda instruction: self.SETNE(instruction),
+                                       "setnc": lambda instruction: self.SETNC(instruction),
+                                       "setnbe": lambda instruction: self.SETNBE(instruction),
+                                       "setnb": lambda instruction: self.SETNB(instruction),
+                                       "setnae": lambda instruction: self.SETNAE(instruction),
+                                       "setl": lambda instruction: self.SETL(instruction),
+                                       "setnle": lambda instruction: self.SETNLE(instruction),
+                                       "setnz": lambda instruction: self.SETNZ(instruction),
+                                       "setz": lambda instruction: self.SETZ(instruction),
+                                       "shl": lambda instruction: self.SHL(instruction),
+                                       "shr": lambda instruction: self.SHR(instruction),
+                                       "std": lambda instruction: self.STD(instruction),
+                                       "stos": lambda instruction: self.STOS(instruction),
+                                       "stosb": lambda instruction: self.STOSB(instruction),
+                                       "stosw": lambda instruction: self.STOSW(instruction),
+                                       "stosd": lambda instruction: self.STOSD(instruction),
+                                       "sub": lambda instruction: self.SUB(instruction),
+                                       "test": lambda instruction: self.TEST(instruction),
+                                       "xchg": lambda instruction: self.XCHG(instruction),
+                                       "xor": lambda instruction: self.XOR(instruction)}
 
     def get_msb(self, value, size):
-        return (value >> ((8 * size) - 1))
-    
+        return value >> ((8 * size) - 1)
+
     def get_lsb(self, value):
-        return (value & 0x1)
-            
+        return value & 0x1
+
     def get_mask(self, size):
-        return (2 ** (8 * size) - 1)
-    
+        return 2 ** (8 * size) - 1
+
     #
     # get_register: This method takes either a register string or index
     #               returning its value.  Size is used for convenience.
@@ -368,59 +370,59 @@ class PyCPU:
                 register = "EAX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EAX, "read")
-                    
+
                 return self.EAX
             elif register == "ECX" or register == 1:
                 register = "ECX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ECX, "read")
-                    
+
                 return self.ECX
             elif register == "EDX" or register == 2:
                 register = "EDX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EDX, "read")
-                    
+
                 return self.EDX
             elif register == "EBX" or register == 3:
                 register = "EBX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EBX, "read")
-                    
+
                 return self.EBX
             elif register == "ESP" or register == 4:
                 register = "ESP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ESP, "read")
-                    
+
                 return self.ESP
             elif register == "EBP" or register == 5:
                 register = "EBP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EBP, "read")
-                    
+
                 return self.EBP
             elif register == "ESI" or register == 6:
                 register = "ESI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ESI, "read")
-                    
+
                 return self.ESI
             elif register == "EDI" or register == 7:
                 register = "EDI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EDI, "read")
-                    
+
                 return self.EDI
             elif register == "EIP":
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EIP, "read")
-                    
+
                 return self.EIP
             elif register == "FEIP":
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.FEIP, "read")
-                    
+
                 return self.FEIP
 
         elif size == 2:
@@ -429,253 +431,253 @@ class PyCPU:
                 register = "AX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EAX & 0xffff, "read")
-                    
+
                 return self.EAX & 0xffff
             elif register == "CX" or register == 1:
                 register = "CX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ECX & 0xffff, "read")
-                    
+
                 return self.ECX & 0xffff
             elif register == "DX" or register == 2:
                 register = "DX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EDX & 0xffff, "read")
-                    
+
                 return self.EDX & 0xffff
             elif register == "BX" or register == 3:
                 register = "BX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EBX & 0xffff, "read")
-                    
+
                 return self.EBX & 0xffff
             elif register == "SP" or register == 4:
                 register = "SP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ESP & 0xffff, "read")
-                    
+
                 return self.ESP & 0xffff
             elif register == "BP" or register == 5:
                 register = "BP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EBP & 0xffff, "read")
-                    
+
                 return self.EBP & 0xffff
             elif register == "SI" or register == 6:
                 register = "SI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ESI & 0xffff, "read")
-                    
+
                 return self.ESI & 0xffff
             elif register == "DI" or register == 7:
                 register = "DI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EDI & 0xffff, "read")
-                    
+
                 return self.EDI & 0xffff
-                
+
             # Segment registers
             elif register == "CS":
                 register = "CS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.CS & 0xffff, "read")
-                    
+
                 return self.CS & 0xffff
             elif register == "SS":
                 register = "SS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.SS & 0xffff, "read")
-                    
+
                 return self.SS & 0xffff
             elif register == "DS":
                 register = "DS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.DS & 0xffff, "read")
-                    
+
                 return self.DS & 0xffff
             elif register == "ES":
                 register = "ES"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ES & 0xffff, "read")
-                    
+
                 return self.ES & 0xffff
             elif register == "FS":
                 register = "FS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.FS & 0xffff, "read")
-                    
+
                 return self.FS & 0xffff
             elif register == "GS":
                 register = "GS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.GS & 0xffff, "read")
-                    
+
                 return self.GS & 0xffff
         elif size == 1:
             if   register == "AL" or register == 0:
                 register = "AL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EAX & 0xFF, "read")
-                    
+
                 return self.EAX & 0xFF
             elif register == "CL" or register == 1:
                 register = "CL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.ECX & 0xFF, "read")
-                    
+
                 return self.ECX & 0xFF
             elif register == "DL" or register == 2:
                 register = "DL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EDX & 0xFF, "read")
-                    
+
                 return self.EDX & 0xFF
             elif register == "BL" or register == 3:
                 register = "BL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, self.EBX & 0xFF, "read")
-                    
+
                 return self.EBX & 0xFF
             elif register == "AH" or register == 4:
                 register = "AH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, ((self.EAX & 0xFF00) >> 8), "read")
-                    
-                return ((self.EAX & 0xFF00) >> 8)
+
+                return (self.EAX & 0xFF00) >> 8
             elif register == "CH" or register == 5:
                 register = "CH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, ((self.ECX & 0xFF00) >> 8), "read")
-                    
-                return ((self.ECX & 0xFF00) >> 8)
+
+                return (self.ECX & 0xFF00) >> 8
             elif register == "DH" or register == 6:
                 register = "DH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, ((self.EDX & 0xFF00) >> 8), "read")
-                    
-                return ((self.EDX & 0xFF00) >> 8)
+
+                return (self.EDX & 0xFF00) >> 8
             elif register == "BH" or register == 7:
                 register = "BH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, ((self.EBX & 0xFF00) >> 8), "read")
-                    
-                return ((self.EBX & 0xFF00) >> 8)
-            
+
+                return (self.EBX & 0xFF00) >> 8
+
             # Flags
             elif register == "CF":
                 register = "CF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.CF & 0xFF), "read")
-                    
-                return (self.CF & 0xFF)
+
+                return self.CF & 0xFF
             elif register == "PF":
                 register = "PF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.PF & 0xFF), "read")
-                    
-                return (self.PF & 0xFF)
+
+                return self.PF & 0xFF
             elif register == "AF":
                 register = "AF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.AF & 0xFF), "read")
-                    
-                return (self.AF & 0xFF)
+
+                return self.AF & 0xFF
             elif register == "ZF":
                 register = "ZF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.ZF & 0xFF), "read")
-                    
-                return (self.ZF & 0xFF)
+
+                return self.ZF & 0xFF
             elif register == "SF":
                 register = "SF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.SF & 0xFF), "read")
-                    
-                return (self.SF & 0xFF)
+
+                return self.SF & 0xFF
             elif register == "TF":
                 register = "TF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.TF & 0xFF), "read")
-                    
-                return (self.TF & 0xFF)
+
+                return self.TF & 0xFF
             elif register == "IF":
                 register = "IF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.IF & 0xFF), "read")
-                    
-                return (self.IF & 0xFF)
+
+                return self.IF & 0xFF
             elif register == "DF":
                 register = "DF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.DF & 0xFF), "read")
-                    
-                return (self.DF & 0xFF)
+
+                return self.DF & 0xFF
             elif register == "OF":
                 register = "OF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.OF & 0xFF), "read")
-                    
-                return (self.OF & 0xFF)
+
+                return self.OF & 0xFF
             elif register == "IOPL":
                 register = "IOPL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.IOPL & 0xFF), "read")
-                    
-                return (self.IOPL & 0xFF)
+
+                return self.IOPL & 0xFF
             elif register == "NT":
                 register = "NT"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.NT & 0xFF), "read")
-                    
-                return (self.NT & 0xFF)
+
+                return self.NT & 0xFF
             elif register == "RF":
                 register = "RF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.RF & 0xFF), "read")
-                    
-                return (self.RF & 0xFF)
+
+                return self.RF & 0xFF
             elif register == "VM":
                 register = "VM"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.VM & 0xFF), "read")
-                    
-                return (self.VM & 0xFF)
+
+                return self.VM & 0xFF
             elif register == "AC":
                 register = "AC"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.AC & 0xFF), "read")
-                    
-                return (self.AC & 0xFF)
+
+                return self.AC & 0xFF
             elif register == "VIF":
                 register = "VIF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.VIF & 0xFF), "read")
-                    
-                return (self.VIF & 0xFF)
+
+                return self.VIF & 0xFF
             elif register == "VIP":
                 register = "VIP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.VIP & 0xFF), "read")
-                    
-                return (self.VIP & 0xFF)
+
+                return self.VIP & 0xFF
             elif register == "ID":
                 register = "ID"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, (self.ID & 0xFF), "read")
-                    
-                return (self.ID & 0xFF)
+
+                return self.ID & 0xFF
         else:
             return False
-        
+
         return False
-    
+
     # Convenience get_register wrapper function
     def get_register32(self, register):
         return self.get_register(register, 4)
-        
+
     def get_register16(self, register):
         return self.get_register(register, 2)
-    
+
     def get_register8(self, register):
         return self.get_register(register, 1)
 
@@ -706,25 +708,25 @@ class PyCPU:
             # Call our memory access handler
             if self.emu.memory_access_handler:
                 self.emu.memory_access_handler(self.emu, address, value, size, "read")
-            
-            # Call our memory read handler    
+
+            # Call our memory read handler
             if self.emu.memory_read_handler:
                 result = self.emu.memory_read_handler(self.emu, address, value, size)
             else:
                 result = value
-            
+
             # Call our memory handler
             if address in self.emu.memory_handlers:
                 result = self.emu.memory_handlers[address](self.emu, address, value, size, "read")
             else:
                 result = value
-                    
+
             # Check if we are touching stack
             if address <= self.emu.stack_base and address >= (self.emu.stack_base - self.emu.stack_size):
                 if self.emu.stack_access_handler:
                     self.emu.stack_access_handler(self.emu, address, value, size, "read")
-                
-                # Call our stack read handler    
+
+                # Call our stack read handler
                 if self.emu.stack_read_handler:
                     result = self.emu.stack_read_handler(self.emu, address, value, size)
                 else:
@@ -732,41 +734,41 @@ class PyCPU:
             elif address <= self.emu.heap_base and address >= (self.emu.heap_base + self.emu.heap_size):
                 if self.emu.heap_access_handler:
                     self.emu.heap_access_handler(self.emu, address, value, size, "read")
-                
+
                 # Call our specific heap read handler
                 if self.emu.heap_read_handler:
                     result = self.emu.heap_read_handler(self.emu, address, value, size)
                 else:
                     result = value
-                    
+
             # This lets the user control what is read
             if not isinstance(result, bool):
                 return result
-                 
+
         return value
-    
-    # Convenience wrappers for get_memory    
+
+    # Convenience wrappers for get_memory
     def get_memory32(self, address):
         value = self.get_memory(address, 4)
-        
+
         return value
-    
+
     def get_memory16(self, address):
         value = self.get_memory(address, 2)
-        
-        return (value & 0x0000ffff)
-    
+
+        return value & 0x0000ffff
+
     def get_memory8(self, address):
         value = self.get_memory(address, 1)
-        
-        return (value & 0x000000ff)
-    
+
+        return value & 0x000000ff
+
     #
     # get_context: Builds a context object for passing to the emulator
     #
     def get_context(self):
         newcontext = PyContext()
-        
+
         newcontext.EAX = self.EAX
         newcontext.ECX = self.ECX
         newcontext.EDX = self.EDX
@@ -776,7 +778,7 @@ class PyCPU:
         newcontext.ESI = self.ESI
         newcontext.EDI = self.EDI
         newcontext.EIP = self.EIP
-        
+
         newcontext.GS = self.GS
         newcontext.FS = self.FS
         newcontext.ES = self.ES
@@ -784,7 +786,7 @@ class PyCPU:
 
         newcontext.CS = self.DS
         newcontext.SS = self.SS
-        
+
         flags = 0x0000000
 
         if self.CF: flags |= self.eflags_map["CF"]
@@ -806,9 +808,9 @@ class PyCPU:
         if self.ID: flags |= self.eflags_map["ID"]
 
         newcontext.EFLAGS = flags
-        
+
         return newcontext
-        
+
     def clear_eflags(self):
         self.CF = 0
         self.PF = 0
@@ -827,9 +829,9 @@ class PyCPU:
         self.VIF = 0
         self.VIP = 0
         self.ID = 0
-        
+
         return True
-    
+
     #
     # sanitize_value: Masks the value based on size
     #
@@ -845,7 +847,7 @@ class PyCPU:
 
     #
     # set_context: Will set the CPU context from a PyContext if called.
-    #        
+    #
     def set_context(self, context):
         self.EAX = context.EAX
         self.ECX = context.ECX
@@ -856,52 +858,52 @@ class PyCPU:
         self.ESI = context.ESI
         self.EDI = context.EDI
         self.EIP = context.EIP
-        
+
         self.GS = context.GS
         self.FS = context.FS
         self.ES = context.ES
         self.DS = context.DS
-        
+
         self.CS = context.CS
         self.SS = context.SS
-        
+
         if context.EFLAGS & self.eflags_map["CF"]:
             self.CF = 1
         if context.EFLAGS & self.eflags_map["PF"]:
             self.PF = 1
         if context.EFLAGS & self.eflags_map["AF"]:
             self.AF = 1
-        if context.EFLAGS & self.eflags_map["ZF"]: 
+        if context.EFLAGS & self.eflags_map["ZF"]:
             self.ZF = 1
-        if context.EFLAGS & self.eflags_map["SF"]: 
+        if context.EFLAGS & self.eflags_map["SF"]:
             self.SF = 1
-        if context.EFLAGS & self.eflags_map["TF"]: 
+        if context.EFLAGS & self.eflags_map["TF"]:
             self.TF = 1
-        if context.EFLAGS & self.eflags_map["IF"]: 
+        if context.EFLAGS & self.eflags_map["IF"]:
             self.IF = 1
-        if context.EFLAGS & self.eflags_map["DF"]: 
+        if context.EFLAGS & self.eflags_map["DF"]:
             self.DF = 1
-        if context.EFLAGS & self.eflags_map["OF"]: 
+        if context.EFLAGS & self.eflags_map["OF"]:
             self.OF = 1
-        if context.EFLAGS & self.eflags_map["IOPL"]: 
+        if context.EFLAGS & self.eflags_map["IOPL"]:
             self.IOPL = 1
-        if context.EFLAGS & self.eflags_map["NT"]: 
+        if context.EFLAGS & self.eflags_map["NT"]:
             self.NT = 1
-        if context.EFLAGS & self.eflags_map["RF"]: 
+        if context.EFLAGS & self.eflags_map["RF"]:
             self.RF = 1
-        if context.EFLAGS & self.eflags_map["VM"]: 
+        if context.EFLAGS & self.eflags_map["VM"]:
             self.VM = 1
-        if context.EFLAGS & self.eflags_map["AC"]: 
+        if context.EFLAGS & self.eflags_map["AC"]:
             self.AC = 1
-        if context.EFLAGS & self.eflags_map["VIF"]: 
+        if context.EFLAGS & self.eflags_map["VIF"]:
             self.VIF = 1
-        if context.EFLAGS & self.eflags_map["VIP"]: 
+        if context.EFLAGS & self.eflags_map["VIP"]:
             self.VIP = 1
-        if context.EFLAGS & self.eflags_map["ID"]: 
+        if context.EFLAGS & self.eflags_map["ID"]:
             self.ID = 1
-        
+
         return True
-    
+
     #
     # set_register: Sets the supplied register to value.  can be used with
     #               the string representation or index. Also calls our user
@@ -914,81 +916,81 @@ class PyCPU:
                 register = "EAX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EAX = value
-                
+
                 return True
             elif register == "ECX" or register == 1:
                 register = "ECX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ECX = value
-                
+
                 return True
             elif register == "EDX" or register == 2:
                 register = "EDX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDX = value
-                
+
                 return True
             elif register == "EBX" or register == 3:
                 register = "EBX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBX = value
-                
+
                 return True
             elif register == "ESP" or register == 4:
                 register = "ESP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ESP = value
-                
+
                 return True
             elif register == "EBP" or register == 5:
                 register = "EBP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBP = value
-                
+
                 return True
             elif register == "ESI" or register == 6:
                 register = "ESI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ESI = value
-                
+
                 return True
             elif register == "EDI" or register == 7:
                 register = "EDI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDI = value
-                
+
                 return True
-            elif register == "EIP":       
+            elif register == "EIP":
                 register = "EIP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EIP = value
-                
+
                 return True
-            elif register == "FEIP":       
+            elif register == "FEIP":
                 register = "FEIP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.FEIP = value
-                
+
                 return True
         elif size == 2:
             # Registers
@@ -996,334 +998,334 @@ class PyCPU:
                 register = "AX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EAX = (self.EAX & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "CX" or register == 1:
                 register = "CX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ECX = (self.ECX & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "DX" or register == 2:
                 register = "DX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDX = (self.EDX & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "BX" or register == 3:
                 register = "BX"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBX = (self.EBX & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "SP" or register == 4:
                 register = "SP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ESP = (self.ESP & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "BP" or register == 5:
                 register = "BP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBP = (self.EBP & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "SI" or register == 6:
                 register = "SI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ESI = (self.ESI & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
             elif register == "DI" or register == 7:
                 register = "DI"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDI = (self.EDI & 0xffff0000) | (value & 0xffff)
-                
+
                 return True
-            
+
             # Segment Registers
             elif register == "CS":
                 register = "CS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.CS = value & 0xffff
-                
+
                 return True
             elif register == "SS":
                 register = "SS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.SS = value & 0xffff
-                
+
                 return True
             elif register == "DS":
                 register = "DS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.DS = value & 0xffff
-                
+
                 return True
             elif register == "ES":
                 register = "ES"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ES = value & 0xffff
-                
+
                 return True
             elif register == "FS":
                 register = "FS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.FS = value & 0xffff
-                
+
                 return True
             elif register == "GS":
                 register = "GS"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.GS = value & 0xffff
-                
+
                 return True
         elif size == 1:
             if   register == "AL" or register == 0:
                 register = "AL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EAX = (self.EAX & 0xffffff00) | (value & 0xff)
-                
+
                 return True
             elif register == "CL" or register == 1:
                 register = "CL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ECX = (self.ECX & 0xffffff00) | (value & 0xff)
-                
+
                 return True
             elif register == "DL" or register == 2:
                 register = "DL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDX = (self.EDX & 0xffffff00) | (value & 0xff)
-                
+
                 return True
             elif register == "BL" or register == 3:
                 register = "BL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBX = (self.EBX & 0xffffff00) | (value & 0xff)
-                
+
                 return True
             elif register == "AH" or register == 4:
                 register = "AH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EAX = (self.EAX & 0xffff00ff) | ((value & 0xff) << 8)
-                
+
                 return True
             elif register == "CH" or register == 5:
                 register = "CH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.ECX = (self.ECX & 0xffff00ff) | ((value & 0xff) << 8)
-                
+
                 return True
             elif register == "DH" or register == 6:
                 register = "DH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EDX = (self.EDX & 0xffff00ff) | ((value & 0xff) << 8)
-                
+
                 return True
             elif register == "BH" or register == 7:
                 register = "BH"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                    
+
                 self.EBX = (self.EBX & 0xffff00ff) | ((value & 0xff) << 8)
-                
+
                 return True
-            
+
             # Flags
             elif register == "CF":
                 register = "CF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.CF = (value & 0xff)
-                
+
                 return True
             elif register == "PF":
                 register = "PF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.PF = (value & 0xff)
-                
+
                 return True
             elif register == "AF":
                 register = "AF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.AF = (value & 0xff)
-                
+
                 return True
             elif register == "ZF":
                 register = "ZF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.ZF = (value & 0xff)
-                
+
                 return True
             elif register == "SF":
                 register = "SF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.SF = (value & 0xff)
-                
+
                 return True
             elif register == "TF":
                 register = "TF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.TF = (value & 0xff)
-                
+
                 return True
             elif register == "IF":
                 register = "IF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.IF = (value & 0xff)
-                
+
                 return True
             elif register == "DF":
                 register = "DF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.DF = (value & 0xff)
-                
+
                 return True
             elif register == "OF":
                 register = "OF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.OF = (value & 0xff)
-                
+
                 return True
             elif register == "IOPL":
                 register = "IOPL"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.IOPL = (value & 0xff)
-                
+
                 return True
             elif register == "NT":
                 register = "NT"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.NT = (value & 0xff)
-                
+
                 return True
             elif register == "RF":
                 register = "RF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.RF = (value & 0xff)
-                
+
                 return True
             elif register == "VM":
                 register = "VM"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.VM = (value & 0xff)
-                
+
                 return True
             elif register == "AC":
                 register = "AC"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.AC = (value & 0xff)
-                
+
                 return True
             elif register == "VIF":
                 register = "VIF"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.VIF = (value & 0xff)
-                
+
                 return True
             elif register == "VIP":
                 register = "VIP"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.VIP = (value & 0xff)
-                
+
                 return True
             elif register == "ID":
                 register = "ID"
                 if register in self.emu.register_handlers:
                     self.emu.register_handlers[register](self.emu, register, value, "write")
-                
+
                 self.ID = (value & 0xff)
-                
-                return True 
+
+                return True
         else:
             return False
-        
+
         return False
-    
+
     # Convenience wrappers for set_register
     def set_register32(self, register, value):
         return self.set_register(register, value, 4)
-   
+
     def set_register16(self, register, value):
         return self.set_register(register, value, 2)
-    
+
     def set_register8(self, register, value):
         return self.set_register(register, value, 1)
-    
+
 
     #
     # set_memory: Handles setting of memory from the CPU.  Calls the memory
@@ -1334,25 +1336,25 @@ class PyCPU:
         # Call our global memory access handler
         if self.emu.memory_access_handler:
             self.emu.memory_access_handler(self.emu, address, value, size, "write")
-        
-        # Call our specific memory write handler    
+
+        # Call our specific memory write handler
         if self.emu.memory_write_handler:
             result = self.emu.memory_write_handler(self.emu, address, value, size)
         else:
             result = True
-        
+
         # Call our address specific memory handler
         if address in self.emu.memory_handlers:
             result = self.emu.memory_handlers[address](self.emu, address, value, size, "write")
         else:
             result = True
-                    
+
         # Check if we are on stack so we can trigger handlers
         if address <= self.emu.stack_base and address >= (self.emu.stack_base - self.emu.stack_size):
             if self.emu.stack_access_handler:
                 self.emu.stack_access_handler(self.emu, address, value, size, "write")
-            
-            # Call our specific stack write handler    
+
+            # Call our specific stack write handler
             if self.emu.stack_write_handler:
                 result = self.emu.stack_write_handler(self.emu, address, value, size)
             else:
@@ -1360,105 +1362,105 @@ class PyCPU:
         elif address >= self.emu.heap_base and address <= (self.emu.heap_base + self.emu.heap_size):
             if self.emu.heap_access_handler:
                 self.emu.heap_access_handler(self.emu, address, value, size, "write")
-            
-            # Call our specific heap write handler    
+
+            # Call our specific heap write handler
             if self.emu.heap_write_handler:
                 result = self.emu.heap_write_handler(self.emu, address, value, size)
             else:
                 result = True
-                
+
         # This lets the user bypass memory writes
         if result:
             return self.emu.memory.set_memory(address, value, size)
-        
+
         return False
-    
-    # Convenience wrappers for set_memory            
+
+    # Convenience wrappers for set_memory
     def set_memory32(self, address, value):
         return self.set_memory(address, value, 4)
-    
+
     def set_memory16(self, address, value):
         return self.set_memory(address, value, 2)
-    
+
     def set_memory8(self, address, value):
         return self.set_memory(address, value, 1)
-    
+
     def set_flags(self, mnemonic, op1, op2, result, size):
         mask = self.get_mask(size)
-        
+
         op1 &= mask
         op2 &= mask
         result &= mask
-        
+
         flags = PyFlags(mnemonic, op1, op2, result, size)
-        
+
         cf = flags.get_CF()
         if cf != None:
             self.CF = cf
-            
+
         af = flags.get_AF()
         if af != None:
             self.AF = af
-            
+
         zf = flags.get_ZF()
         if zf != None:
             self.ZF = zf
-            
+
         sf = flags.get_SF()
         if sf != None:
             self.SF = sf
-            
+
         of = flags.get_OF()
         if of != None:
             self.OF = of
-            
+
         pf = flags.get_PF()
         if pf != None:
             self.PF = pf
-        
+
         return True
 
     # Sign extends a value
     def sign_extend(self, number, orig_size, dest_size):
         orig_max = (2 ** (8 * orig_size) - 1)
         dest_max = (2 ** (8 * dest_size) - 1)
-        
+
         orig_shift = (8 * orig_size)
         dest_shirt = (8 * dest_size)
-        
+
         masknumber = number & orig_max
         msb = masknumber >> (orig_shift - 1)
-        
+
         if msb:
             signextended = ((dest_max << orig_shift) | masknumber) & dest_max
         else:
             signextended = masknumber & dest_max
-        
+
         return signextended
-    
+
     # Swaps a dwords bytes
     def swap_bytes(self, value):
-        return (((value & 0xff) << 24) | (((value & 0xff00) >> 8) << 16) | (((value & 0xff0000) >> 16) << 8) | ((value & 0xff000000) >> 24))
-    
+        return ((value & 0xff) << 24) | (((value & 0xff00) >> 8) << 16) | (((value & 0xff0000) >> 16) << 8) | ((value & 0xff000000) >> 24)
+
     #
     # execute: The method for advancing execution.  EIP will be saved and
     #          any user pc handlers will be called.  Then we fetch and execute.
-    #          
+    #
     def execute(self):
         self.description = ''
         # Check our program counter handlers
         if self.EIP in self.emu.pc_handlers:
             if not self.emu.pc_handlers[self.EIP](self.emu, self.EIP):
                 return False
-        
+
         if self.EIP in self.emu.os.libraries:
             library = self.emu.os.libraries[self.EIP]
             if self.DEBUG > 1:
                 print "[*] Calling 0x%08x:%s" % (self.EIP, library['name'])
-            
+
             if library['name'] in self.emu.library_handlers:
                 result = self.emu.library_handlers[library['name']](library['name'], library['address'])
-                
+
                 if not result:
                     return False
                 else:
@@ -1483,24 +1485,24 @@ class PyCPU:
             if not rawinstruction:
                 #print "[!] Problem fetching raw bytes from 0x%08x" % (self.EIP)
                 return False
-            
+
             # Decode instruction from raw returning a pydasm.instruction
             instruction = pydasm.get_instruction(rawinstruction, pydasm.MODE_32)
             if not instruction:
                 if self.DEBUG:
                     print "[!!] Problem decoding instruction"
                 return False
-    
+
             # Create our python class for instruction, we do this in case we ever leave pydasm
             pyinstruction = PyInstruction(instruction, rawinstruction, self.EIP)
-        
+
             self.executed_instructions[self.EIP] = pyinstruction
         else:
             pyinstruction = self.executed_instructions[self.EIP]
-                
+
         if self.DEBUG > 0:
             print "[*] Executing [0x%x][%x] %s" % (self.EIP, pyinstruction.opcode, pyinstruction.disasm)
-        
+
         # We must split any prefix sense we use flags
         pyinstruction.mnemonic = pyinstruction.mnemonic.split()
         if pyinstruction.mnemonic[0] in ["rep", "repe", "repne", "lock"]:
@@ -1522,7 +1524,7 @@ class PyCPU:
             if self.DEBUG:
                 print "[!] Unsupported instruction %s" % pyinstruction.mnemonic
             return False
-        
+
         if self.description:
             pyinstruction.description = self.description
 
@@ -1532,12 +1534,12 @@ class PyCPU:
 
         # If EIP has not changed we advance to the next instruction in code
         if self.EIP == self.lastEIP and pyinstruction.mnemonic not in ['ret', 'call', 'jmp']:
-            self.EIP += pyinstruction.length 
+            self.EIP += pyinstruction.length
 
         self.EIP = int(self.EIP)
         # Everything checked out
         return True
-    
+
     #
     # get_memory_address: Calculates the memory address from the instruction.
     #
@@ -1551,13 +1553,13 @@ class PyCPU:
             op = instruction.op3
         else:
             #print "[!] get_memory_address() couldnt understand opnum"
-            
+
             return False
- 
+
         # Call our convenience functions for mod/rm bytes
         mod = instruction.get_mod()
         rm = instruction.get_rm()
-        
+
         # Call our convenience function for s/i/b bytes
         scale = instruction.get_scale()
         index = instruction.get_index()
@@ -1569,10 +1571,10 @@ class PyCPU:
                 # do register deref
                 if rm == 0x5:
                     address = op.displacement
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching displacement memory for %x" % address
-                        
+
                     return address
                 elif rm == 0x4:
                     # do sib
@@ -1619,17 +1621,17 @@ class PyCPU:
                                 address = self.get_register16(base)
                             else:
                                 address = self.get_register16(base) + (self.get_register16(index) * 8)
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching 32 bit sib %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register16(op.basereg)
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching register [%d] %x" % (op.basereg, address)
-                        
+
                     return address
             elif mod == 0x1:
                 # do register deref + displacement8
@@ -1677,13 +1679,13 @@ class PyCPU:
                                 address = self.get_register16(base)
                             else:
                                 address = self.get_register16(base) + (self.get_register16(index) * 8)
-                    
+
                     address += op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + sib + disp8 %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register16(op.basereg) + op.displacement
@@ -1691,7 +1693,7 @@ class PyCPU:
 
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + disp8 %x" % address
-                        
+
                     return address
             elif mod == 0x2:
                 # do register deref + displacement32
@@ -1739,33 +1741,33 @@ class PyCPU:
                                 address = self.get_register16(base)
                             else:
                                 address = self.get_register16(base) + (self.get_register16(index) * 8)
-                        
+
                     address += op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + sib + disp32 %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register16(op.basereg) + op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + disp32 %x" % address
-                        
+
                     return address
             elif mod == 0x3:
                 address = self.get_register16(op.basereg)
                 address = int(address & 0xffffffff) # need to limit to 32 bits
-                
+
                 if self.DEBUG > 2:
                     print "[*] Fetching plain register %x" % op.reg
-                    
+
                 return address
             else:
                 #print "[!] get_memory_address(): unknown memory"
-                
+
                 return False
         else:
             # do 32 bit
@@ -1775,10 +1777,10 @@ class PyCPU:
                 if rm == 0x5:
                     address = op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching displacement memory for %x" % address
-                        
+
                     return address
                 elif rm == 0x4:
                     # do sib
@@ -1825,19 +1827,19 @@ class PyCPU:
                                 address = self.get_register32(base)
                             else:
                                 address = self.get_register32(base) + (self.get_register32(index) * 8)
-                    
+
                     address = int(address & 0xffffffff) # need to limit to 32 bits
                     if self.DEBUG > 2:
                         print "[*] Fetching 32 bit sib %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register32(op.basereg)
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching register [%d] %x" % (op.basereg, address)
-                        
+
                     return address
             elif mod == 0x1:
                 # do register deref + displacement8
@@ -1848,7 +1850,7 @@ class PyCPU:
                             if index == 0x4:
                                 address = (op.displacement & 0xff)
                             else:
-                                address =  self.get_register32("EBP") + (self.get_register32(index))
+                                address = self.get_register32("EBP") + (self.get_register32(index))
                         elif scale == 0x1:
                             if index == 0x4:
                                 address = (op.displacement & 0xff)
@@ -1891,15 +1893,15 @@ class PyCPU:
 
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + sib + disp8 %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register32(op.basereg) + op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + disp8 %x" % address
-                        
+
                     return address
             elif mod == 0x2:
                 # do register deref + displacement32
@@ -1910,12 +1912,12 @@ class PyCPU:
                             if index == 0x4:
                                 address = op.displacement
                             else:
-                                address =  self.get_register32("EBP") + (self.get_register32(index))
+                                address = self.get_register32("EBP") + (self.get_register32(index))
                         elif scale == 0x1:
                             if index == 0x4:
                                 address = op.displacement
                             else:
-                                address =  self.get_register32("EBP") + (self.get_register32(index) * 2)
+                                address = self.get_register32("EBP") + (self.get_register32(index) * 2)
                         elif scale == 0x2:
                             if index == 0x4:
                                 address = op.displacement
@@ -1947,62 +1949,62 @@ class PyCPU:
                                 address = self.get_register32(base)
                             else:
                                 address = self.get_register32(base) + (self.get_register32(index) * 8)
-                        
+
                     address += op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + sib + disp32 %x" % address
-                        
+
                     return address
                 else:
                     address = self.get_register32(op.basereg) + op.displacement
                     address = int(address & 0xffffffff) # need to limit to 32 bits
-                    
+
                     if self.DEBUG > 2:
                         print "[*] Fetching reg + disp32 %x" % address
-                        
+
                     return address
             elif mod == 0x3:
                 address = self.get_register32(op.basereg)
                 address = int(address & 0xffffffff) # need to limit to 32 bits
-                
+
                 if self.DEBUG > 2:
                     print "[*] Fetching plain register %x" % op.reg
-                    
+
                 return address
             else:
                 #print "[!] get_memory_address(): unknown memory"
-                
+
                 return False
-                
+
         return False
-        
+
     #
     # get_disasm: will fetch the current instruction and pretty it up
     #
     def get_disasm(self):
         if not self.emu.memory.is_valid(self.EIP):
             return False
-            
+
         rawinstruction = self.get_memory(self.EIP, 32)
         if not rawinstruction:
             #print "[!] Problem fetching raw bytes from 0x%08x" % (self.EIP)
-            
+
             return False
-        
+
         # Decode instruction from raw returning a pydasm.instruction
         instruction = pydasm.get_instruction(rawinstruction, pydasm.MODE_32)
         if not instruction:
             #print "[!] Problem decoding instruction"
-            
+
             return False
-        
+
         return pydasm.get_instruction_string(instruction, pydasm.FORMAT_INTEL, self.EIP).rstrip(" ")
-    
+
     def set_debug(self, level):
         self.DEBUG = level
-        
+
         return True
 
     #
@@ -2015,52 +2017,52 @@ class PyCPU:
         else:
             if self.DEBUG > 2:
                 print "[!] Skipping int %d" % (interrupt)
-        
+
         return True
-        
+
     #
     # dump_stack: Prints out the stack addresses and values
     #
     def dump_stack(self, count=64):
         if not self.emu.memory.is_valid(self.ESP):
             return False
-        
+
         print "ESP:"
         for x in xrange(0, count, 4):
             address = self.ESP + (count / 2) - x
-            
+
             if not self.emu.memory.is_valid(address):
                 return False
-                
+
             print "0x%08x: %08x" % (address, self.get_memory32(address))
         print "\n"
-        
+
         if not self.emu.memory.is_valid(self.EBP):
             return False
-            
+
         print "EBP:"
         for x in xrange(0, count, 4):
             address = self.EBP + (count / 2) - x
             if not self.emu.memory.is_valid(address):
                 return False
-            
+
             print "0x%08x: %08x" % (address, self.get_memory32(address))
         print "\n"
-        
+
         return True
 
     #
     # dump_regs: Prints out the registers
-    #    
+    #
     def dump_regs(self):
         sys.stdout.write("\n")
         sys.stdout.write("eax=%08x ebx=%08x ecx=%08x edx=%08x esi=%08x edi=%08x\n" %
         (self.EAX, self.EBX, self.ECX,
         self.EDX, self.ESI, self.EDI))
-        sys.stdout.write("eip=%08x esp=%08x ebp=%08x iopl=%02x\n" % 
+        sys.stdout.write("eip=%08x esp=%08x ebp=%08x iopl=%02x\n" %
         (self.EIP, self.ESP, self.EBP, self.IOPL))
         sys.stdout.write("cs=%04x ss=%04x ds=%04x es=%04x fs=%04x gs=%04x    eflags=[" % (self.CS, self.SS, self.DS, self.ES, self.FS, self.GS))
-        
+
         if self.CF: sys.stdout.write("CF ")
         if self.PF: sys.stdout.write("PF ")
         if self.AF: sys.stdout.write("AF ")
@@ -2077,15 +2079,15 @@ class PyCPU:
         if self.VIF: sys.stdout.write("VIF ")
         if self.VIP: sys.stdout.write("VIP ")
         if self.ID: sys.stdout.write("ID ")
-        
+
         sys.stdout.write("]\n\n")
-        
+
         if self.emu.memory.is_valid(self.EIP):
             sys.stdout.write("%08x  %s\n\n" % (self.EIP, self.get_disasm()))
 
     '''
     Instructions:
-    
+
         The following code will execute each instruction based on the mnemonic.
         This code was auto generated for the most part except the actual logic.
         Each one should be very similar and first sets up the operands,
@@ -2138,7 +2140,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
- 
+
         return True
 
     def ADC(self, instruction):
@@ -2179,7 +2181,7 @@ class PyCPU:
                 self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2188,13 +2190,13 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value + self.CF
 
                 self.set_flags("ADC", op1valuederef, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -2220,7 +2222,7 @@ class PyCPU:
                 self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2229,13 +2231,13 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value + self.CF
 
                 self.set_flags("ADC", op1valuederef, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -2262,7 +2264,7 @@ class PyCPU:
                 self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2270,13 +2272,13 @@ class PyCPU:
 
                 # Do logic
                 op2valuederef = self.get_memory(op2value, osize)
-                
+
                 result = op1value + op2valuederef + self.CF
 
                 self.set_flags("ADC", op1value, op2valuederef + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = instruction.opcode
@@ -2302,7 +2304,7 @@ class PyCPU:
             self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
             result = self.sanitize_value(result, osize)
-            
+
             self.set_register(0, result, osize)
 
             opcode = instruction.opcode
@@ -2327,7 +2329,7 @@ class PyCPU:
             self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
             result = self.sanitize_value(result, osize)
-            
+
             self.set_register(0, result, osize)
 
             opcode = instruction.opcode
@@ -2353,7 +2355,7 @@ class PyCPU:
                 self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2362,13 +2364,13 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value + self.CF
 
                 self.set_flags("ADC", op1valuederef, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = instruction.opcode
@@ -2394,7 +2396,7 @@ class PyCPU:
                 self.set_flags("ADC", op1value, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2403,13 +2405,13 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value + self.CF
 
                 self.set_flags("ADC", op1valuederef, op2value + self.CF, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = instruction.opcode
@@ -2423,7 +2425,7 @@ class PyCPU:
 
         else:
             return False
-            
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -2432,7 +2434,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -2452,7 +2454,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -2474,7 +2476,7 @@ class PyCPU:
                 self.set_flags("ADD", op1value, op2value, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -2483,7 +2485,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value
 
                 self.set_flags("ADD", op1valuederef, op2value, result, osize)
@@ -2515,16 +2517,16 @@ class PyCPU:
                 self.set_flags("ADD", op1value, op2value, result, osize)
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register(op2.reg, osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value
 
                 self.set_flags("ADD", op1valuederef, op2value, result, osize)
@@ -2579,7 +2581,7 @@ class PyCPU:
         #03 /r ADD r16,r/m16 Add r/m16 to r16
         #03 /r ADD r32,r/m32 Add r/m32 to r32
         elif instruction.opcode == 0x03:
-            
+
             op1value = self.get_register(op1.reg, osize)
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
@@ -2602,7 +2604,7 @@ class PyCPU:
                 result = self.sanitize_value(result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 if instruction.fs_override():
                     fs = self.get_register16("FS")
@@ -2617,7 +2619,7 @@ class PyCPU:
 
                 # Do logic
                 op2valuederef = self.get_memory(op2value, osize)
-                
+
                 result = op1value + op2valuederef
 
                 self.set_flags("ADD", op1value, op2valuederef, result, osize)
@@ -2625,7 +2627,7 @@ class PyCPU:
                 result = self.sanitize_value(result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -2651,7 +2653,7 @@ class PyCPU:
             result = self.sanitize_value(result, osize)
 
             self.set_register(0, result, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -2733,14 +2735,14 @@ class PyCPU:
                 result = self.sanitize_value(result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value
 
                 self.set_flags("ADD", op1valuederef, op2value, result, osize)
@@ -2769,20 +2771,20 @@ class PyCPU:
 
                 # Do logic
                 result = op1value + op2value
-                
+
                 self.set_flags("ADD", op1value, op2value, result, osize)
 
                 result = self.sanitize_value(result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef + op2value
 
                 self.set_flags("ADD", op1valuederef, op2value, result, osize)
@@ -2811,7 +2813,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -2831,7 +2833,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -2853,14 +2855,14 @@ class PyCPU:
                 self.set_flags("LOGIC", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register(op2.reg, osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef & op2value
 
                 self.set_flags("LOGIC", op1valuederef, op2value, result, osize)
@@ -2890,14 +2892,14 @@ class PyCPU:
                 self.set_flags("LOGIC", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register(op2.reg, osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef & op2value
 
                 self.set_flags("LOGIC", op1valuederef, op2value, result, osize)
@@ -2928,11 +2930,11 @@ class PyCPU:
                 self.set_flags("LOGIC", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 op2value = self.get_memory_address(instruction, 2, asize)
                 op2valuederef = self.get_memory(op2value, osize)
-                
+
                 # Do logic
                 result = op1value & op2valuederef
 
@@ -2963,7 +2965,7 @@ class PyCPU:
             self.set_flags("LOGIC", op1value, op2value, result, osize)
 
             self.set_register(0, result, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -2986,7 +2988,7 @@ class PyCPU:
             self.set_flags("LOGIC", op1value, op2value, result, osize)
 
             self.set_register(0, result, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -3011,14 +3013,14 @@ class PyCPU:
                 self.set_flags("LOGIC", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef & op2value
 
                 self.set_flags("LOGIC", op1valuederef, op2value, result, osize)
@@ -3048,14 +3050,14 @@ class PyCPU:
                 self.set_flags("LOGIC", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef & op2value
 
                 self.set_flags("LOGIC", op1valuederef, op2value, result, osize)
@@ -3117,7 +3119,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -3137,19 +3139,19 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #0F C8 rd BSWAP r32 reverse the byte order of a 32-bit register
         if instruction.opcode >= 0xc8 and instruction.opcode <= 0xcf:
 
             value = self.swap_bytes(self.get_register(op1.reg, osize))
             self.set_register(op1.reg, value, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -3160,7 +3162,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
         else:
             return False
-            
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -3169,9 +3171,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-        
+
         return True
-        
+
     def CALL(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -3188,7 +3190,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -3220,16 +3222,16 @@ class PyCPU:
             # Do logic
             eip = self.get_register32("EIP") + instruction.length + op1value
             returneip = self.get_register32("EIP") + instruction.length
-            
+
             # dec esp
             esp = self.get_register32("ESP") - 4
-            
+
             # store returneip
             self.set_memory(esp, returneip, 4)
-            
+
             # set new esp
             self.set_register32("ESP", esp)
-            
+
             # change to new eip
             self.set_register32("EIP", eip)
 
@@ -3245,47 +3247,47 @@ class PyCPU:
         #FF /2 CALL r/m16 Call near, absolute indirect, address given in r/m16
         #FF /2 CALL r/m32 Call near, absolute indirect, address given in r/m32
         elif instruction.opcode == 0xff and instruction.extindex == 0x2:
-            
+
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 # Do logic
                 eip = op1value
                 returneip = self.get_register32("EIP") + instruction.length
-                
+
                 # dec esp
                 esp = self.get_register32("ESP") - 4
-                
+
                 # store returneip
                 self.set_memory32(esp, returneip)
-                
+
                 # set new esp
                 self.set_register32("ESP", esp)
-                
+
                 # change to new eip
                 self.set_register32("EIP", eip)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 eip = op1valuederef
                 #print "CALL(FF) to " + hex(eip)
                 returneip = self.get_register32("EIP") + instruction.length
-                
+
                 # dec esp
                 esp = self.get_register32("ESP") - 4
-                
+
                 # store return eip
                 self.set_memory32(esp, returneip)
-                
+
                 # set new esp
                 self.set_register32("ESP", esp)
-                
+
                 # change to new eip
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -3298,7 +3300,7 @@ class PyCPU:
         #FF /3 CALL m16:16 Call far, absolute indirect, address given in m16:16
         #FF /3 CALL m16:32 Call far, absolute indirect, address given in m16:32
         elif instruction.opcode == 0xff and instruction.extindex == 0x3:
-    
+
             print "[!] Unsupported until test case found"
             return False
 
@@ -3359,14 +3361,14 @@ class PyCPU:
                 if self.get_msb(op1value, 1):
                     self.set_register8("AH", 0xff)
                 else:
-                    self.set_register8("AH", 0x0) 
+                    self.set_register8("AH", 0x0)
             else:
                 op1value = self.get_register16("AX")
 
                 if self.get_msb(op1value, 2):
                     self.set_register32("EAX", 0xffff0000|op1value)
                 else:
-                    self.set_register32("EAX", 0x0000ffff&op1value) 
+                    self.set_register32("EAX", 0x0000ffff&op1value)
 
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
@@ -3408,7 +3410,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-        
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -3418,12 +3420,12 @@ class PyCPU:
         #99 CDQ EDX:EAX . sign-extend of EAX
         if instruction.opcode == 0x99:
             op1value = self.get_register32("EAX")
-            
+
             # Do logic
             if op1value >> 31:
                 self.set_register32("EDX", 0xffffffff)
             else:
-                self.set_register32("EDX", 0x0) 
+                self.set_register32("EDX", 0x0)
 
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
@@ -3445,7 +3447,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CLC(self, instruction):
@@ -3464,7 +3466,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -3497,7 +3499,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CLD(self, instruction):
@@ -3516,7 +3518,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -3549,7 +3551,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CMP(self, instruction):
@@ -3568,13 +3570,13 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #38 /r CMP r/m8,r8 Compare r8 with r/m8
         if instruction.opcode == 0x38:
 
@@ -3595,7 +3597,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - op2value
 
                 self.set_flags("CMP", op1valuederef, op2value, result, osize)
@@ -3628,7 +3630,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - op2value
                 #print "CMP(39)", hex(op1valuederef), hex(op2value), hex(result)
                 self.set_flags("CMP", op1valuederef, op2value, result, osize)
@@ -3692,7 +3694,7 @@ class PyCPU:
 
                 # Do logic
                 op2valuederef = self.get_memory(op2value, osize)
-                
+
                 result = op1value - op2valuederef
                 #print "CMP(3b):", hex(op1value), hex(op2valuederef)
                 self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -3770,7 +3772,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - op2value
 
                 self.set_flags("CMP", op1valuederef, op2value, result, osize)
@@ -3804,7 +3806,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - op2value
 
                 self.set_flags("CMP", op1valuederef, op2value, result, osize)
@@ -3838,7 +3840,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - op2value
 
                 self.set_flags("CMP", op1valuederef, op2value, result, osize)
@@ -3863,7 +3865,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CMPS(self, instruction):
@@ -3882,7 +3884,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -3937,7 +3939,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CMPSB(self, instruction):
@@ -3956,17 +3958,17 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #A6 CMPSB Compares byte at address DS:(E)SI with byte at address ES:(E)DI and sets the status flags accordingly
         if instruction.opcode == 0xa6:
             osize = 1
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
@@ -3974,10 +3976,10 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
@@ -3988,54 +3990,54 @@ class PyCPU:
                         else:
                             self.set_register16("DI", op2value - osize)
                             self.set_register16("SI", op1value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op2value + osize)
                             self.set_register16("SI", op1value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
                             self.set_register16("SI", op1value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.DS + self.get_register16("SI")
                     op2value = self.ES + self.get_register16("DI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                                        
+
                     if not self.DF:
                         self.set_register16("DI", op2value + osize)
                         self.set_register16("SI", op1value + osize)
                     else:
                         self.set_register16("DI", op2value - osize)
                         self.set_register16("SI", op1value - osize)
-            
+
             else:
                 if instruction.repe():
                     repcount = self.get_register32("ECX")
@@ -4043,14 +4045,14 @@ class PyCPU:
                     while repcount and self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                             self.set_register32("ESI", op1value + osize)
@@ -4061,40 +4063,40 @@ class PyCPU:
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repne():
                     repcount = self.get_register32("ECX")
-                    
+
                     self.ZF = 0
                     while repcount and not self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                             self.set_register32("ESI", op1value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
                             self.set_register32("ESI", op1value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register32("ESI")
                     op2value = self.get_register32("EDI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
@@ -4126,7 +4128,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CMPSW(self, instruction):
@@ -4145,7 +4147,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -4154,20 +4156,20 @@ class PyCPU:
 
         #A7 CMPSW Compares word at address DS:(E)SI with word at address ES:(E)DI and sets the status flags accordingly
         if instruction.opcode == 0xa7:
-            
+
             osize = 2
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount and not self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
@@ -4176,113 +4178,113 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount and self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.DS + self.get_register16("SI")
                     op2value = self.ES + self.get_register16("DI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                                        
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
-            
+
             else:
                 if instruction.repne():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount and not self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount and self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register32("ESI")
                     op2value = self.get_register32("EDI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                                        
+
                     if not self.DF:
                         self.set_register32("EDI", op2value + osize)
                     else:
                         self.set_register32("EDI", op2value - osize)
-                        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -4303,7 +4305,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CMPSD(self, instruction):
@@ -4322,7 +4324,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -4331,20 +4333,20 @@ class PyCPU:
 
         #A7 CMPSD Compares doubleword at address DS:(E)SI with doubleword at address ES:(E)DI and sets the status flags accordingly
         if instruction.opcode == 0xa7:
-            
+
             osize = 4
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount and not self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
@@ -4353,113 +4355,113 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount and self.ZF:
                         op1value = self.DS + self.get_register16("SI")
                         op2value = self.ES + self.get_register16("DI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.DS + self.get_register16("SI")
                     op2value = self.ES + self.get_register16("DI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                                        
+
                     if not self.DF:
                         self.set_register16("DI", op2value + osize)
                     else:
                         self.set_register16("DI", op2value - osize)
-            
+
             else:
                 if instruction.repne():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount and not self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount and self.ZF:
                         op1value = self.get_register32("ESI")
                         op2value = self.get_register32("EDI")
-                        
+
                         op1valuederef = self.get_memory(op1value, osize)
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1valuederef - op2valuederef
 
                         self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register32("ESI")
                     op2value = self.get_register32("EDI")
-                    
+
                     op1valuederef = self.get_memory(op1value, osize)
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op1valuederef - op2valuederef
 
                     self.set_flags("CMP", op1valuederef, op2valuederef, result, osize)
-                                        
+
                     if not self.DF:
                         self.set_register32("EDI", op2value + osize)
                     else:
                         self.set_register32("EDI", op2value - osize)
-                        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -4480,7 +4482,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def CWD(self, instruction):
@@ -4547,7 +4549,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -4679,7 +4681,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -4699,7 +4701,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -4716,10 +4718,10 @@ class PyCPU:
 
                 # Do logic
                 ax = self.get_register16("AX")
-                
+
                 if op1value == 0 or op1value > self.get_mask(osize):
                     return self.emu.raise_exception("DE", self.EIP)
-                    
+
                 temp = ax / op1value
                 if temp > 0xff:
                     return False
@@ -4732,12 +4734,12 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 ax = self.get_register16("AX")
-                
+
                 if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
                     return self.emu.raise_exception("DE", self.EIP)
-                    
+
                 temp = ax / op1valuederef
                 if temp > 0xff:
                     return False
@@ -4766,12 +4768,12 @@ class PyCPU:
                     ax = self.get_register16("AX")
                     dx = self.get_register16("DX")
                     axdx = ((dx << 16) | ax)
-                    
+
                     if op1value == 0 or op1value > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                    
+
                     temp = axdx / op1value
-                    
+
                     if temp > 0xffff:
                         return False
                     else:
@@ -4781,34 +4783,34 @@ class PyCPU:
                     eax = self.get_register32("EAX")
                     edx = self.get_register32("EDX")
                     eaxedx = ((edx << 32) | eax)
-                    
+
                     if op1value == 0 or op1value > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                    
+
                     temp = eaxedx / op1value
-                    
+
                     if temp > 0xffffffff:
                         return False
                     else:
                         self.set_register32("EAX", temp)
                         self.set_register32("EDX", eaxedx % op1value)
-                        
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     ax = self.get_register16("AX")
                     dx = self.get_register16("DX")
                     axdx = ((dx << 16) | ax)
-                    
+
                     if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                    
+
                     temp = axdx / op1valuederef
-                    
+
                     if temp > 0xffff:
                         return False
                     else:
@@ -4818,12 +4820,12 @@ class PyCPU:
                     eax = self.get_register32("EAX")
                     edx = self.get_register32("EDX")
                     eaxedx = ((edx << 32) | eax)
-                    
+
                     if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                        
+
                     temp = eaxedx / op1valuederef
-                    
+
                     if temp > 0xffffffff:
                         return False
                     else:
@@ -4850,7 +4852,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     # We don't really need to do the instruction, we just need the EIP for fnstenv
@@ -4896,7 +4898,7 @@ class PyCPU:
         self.set_memory(op1valuederef+0x18, 0, osize)
 
         self.set_register32("FEIP", self.get_register32("EIP"))
- 
+
         opcode = instruction.opcode
         if opcode in self.emu.opcode_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -4933,7 +4935,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -4950,12 +4952,12 @@ class PyCPU:
 
                 # Do logic
                 ax = self.get_register16("AX")
-                
+
                 if op1value == 0 or op1value > self.get_mask(osize):
-                        return self.emu.raise_exception("DE", self.EIP)
-                        
+                    return self.emu.raise_exception("DE", self.EIP)
+
                 temp = ax / op1value
-                
+
                 if temp > 0xff:
                     return False
                 else:
@@ -4967,12 +4969,12 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 ax = self.get_register16("AX")
-                
+
                 if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
-                        return self.emu.raise_exception("DE", self.EIP)
-                
+                    return self.emu.raise_exception("DE", self.EIP)
+
                 temp = ax / op1valuederef
 
                 if temp > 0xff:
@@ -5002,12 +5004,12 @@ class PyCPU:
                     ax = self.get_register16("AX")
                     dx = self.get_register16("DX")
                     axdx = ((dx << 16) | ax)
-                    
+
                     if op1value == 0 or op1value > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                        
+
                     temp = axdx / op1value
-                    
+
                     if temp > 0xffff:
                         return False
                     else:
@@ -5017,34 +5019,34 @@ class PyCPU:
                     eax = self.get_register32("EAX")
                     edx = self.get_register32("EDX")
                     eaxedx = ((edx << 32) | eax)
-                    
-                    if op1value == 0 or op1value> self.get_mask(osize):
+
+                    if op1value == 0 or op1value > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                        
+
                     temp = eaxedx / op1value
-                    
+
                     if temp > 0xffffffff:
                         return False
                     else:
                         self.set_register32("EAX", temp)
                         self.set_register32("EDX", eaxedx % op1value)
-                        
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     ax = self.get_register16("AX")
                     dx = self.get_register16("DX")
                     axdx = ((dx << 16) | ax)
-                    
+
                     if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                        
+
                     temp = axdx / op1valuederef
-                    
+
                     if temp > 0xffff:
                         return False
                     else:
@@ -5054,12 +5056,12 @@ class PyCPU:
                     eax = self.get_register32("EAX")
                     edx = self.get_register32("EDX")
                     eaxedx = ((edx << 32) | eax)
-                    
+
                     if op1valuederef == 0 or op1valuederef > self.get_mask(osize):
                         return self.emu.raise_exception("DE", self.EIP)
-                        
+
                     temp = eaxedx / op1valuederef
-                    
+
                     if temp > 0xffffffff:
                         return False
                     else:
@@ -5086,7 +5088,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -5094,7 +5096,7 @@ class PyCPU:
         op1 = instruction.op1
         op2 = instruction.op2
         op3 = None
-        
+
         if instruction.op3:
             op3 = instruction.op3
 
@@ -5110,13 +5112,13 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #0F AF /r IMUL r16,r/m16 word register . word register * r/m word
         #0F AF /r IMUL r32,r/m32 doubleword register . doubleword register * r/m doubleword
         if instruction.opcode == 0xaf:
@@ -5128,9 +5130,9 @@ class PyCPU:
 
                 # Do logic
                 result = op1value * op2value
-                
+
                 self.set_flags("IMUL", op1value, op2value, result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -5138,11 +5140,11 @@ class PyCPU:
 
                 # Do logic
                 op2valuederef = self.get_memory(op2value, osize)
-                
+
                 result = op1value * op2valuederef
-                
+
                 self.set_flags("IMUL", op1value, op2value, result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -5164,27 +5166,27 @@ class PyCPU:
 
             if op3:
                 op3value = op3.immediate & self.get_mask(osize)
-                
+
                 if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                     op2value = self.get_register(op2.reg, osize)
-                            
+
                     # Do logic
                     result = op2value * op3value
-                    
+
                     self.set_flags("IMUL", op2value, op3value, result, osize)
-                    
+
                     self.set_register(op1.reg, result, osize)
-                    
+
                 elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                     op2value = self.get_memory_address(instruction, 2, asize)
 
                     # Do logic
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op2valuederef * op3value
-                    
+
                     self.set_flags("IMUL", op1value, op2value, result, osize)
-                    
+
                     self.set_register(op1.reg, result, osize)
             else:
                 op2value = op2.immediate & self.get_mask(osize)
@@ -5193,7 +5195,7 @@ class PyCPU:
                 result = op1value * op2value
 
                 self.set_flags("IMUL", op2value, op3value, result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = instruction.opcode
@@ -5216,36 +5218,36 @@ class PyCPU:
             # Do logic
             if op3:
                 op3value = self.sign_extend((op3.immediate & self.get_mask(osize)), 1, osize)
-                
+
                 if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                     op2value = self.get_register(op2.reg, osize)
-                            
+
                     # Do logic
                     result = op2value * op3value
-                    
+
                     self.set_flags("IMUL", op2value, op3value, result, osize)
-                    
+
                     self.set_register(op1.reg, result, osize)
-                    
+
                 elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                     op2value = self.get_memory_address(instruction, 2, asize)
 
                     # Do logic
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     result = op2valuederef * op3value
-                    
+
                     self.set_flags("IMUL", op1value, op2value, result, osize)
-                    
+
                     self.set_register(op1.reg, result, osize)
             else:
                 op2value = self.sign_extend((op2.immediate & self.get_mask(osize)), 1, osize)
-                        
+
                 # Do logic
                 result = op1value * op2value
-                
+
                 self.set_flags("IMUL", op2value, op3value, result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = instruction.opcode
@@ -5265,27 +5267,27 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("AL")
-                
+
                 # Do logic
                 result = op2value * op1value
-                
+
                 self.OF = 0
                 self.CF = 0
-                
+
                 self.set_register16("AX", result)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("AL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op2value * op1valuederef
-                
+
                 self.OF = 0
                 self.CF = 0
-                
+
                 self.set_register16("AX", result)
 
             opcode = instruction.opcode
@@ -5305,87 +5307,87 @@ class PyCPU:
                 if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register16("AX")
-                
+
                     # Do logic
                     result = op2value * op1value
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register16("DX", high)
                     self.set_register16("AX", low)
-    
+
                 elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_memory_address(instruction, 1, asize)
                     op2value = self.get_register16("AX")
-                    
+
                     # Do logic
                     op1valuederef = self.get_memory(op1value, osize)
-                    
+
                     result = op2value * op1valuederef
-                    
+
                     high = (result >> 16)
                     low = (result & 0xffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register16("DX", high)
                     self.set_register16("AX", low)
             else:
                 if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register32("EAX")
-                
+
                     # Do logic
                     result = op2value * op1value
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register32("EDX", high)
                     self.set_register32("EAX", low)
-    
+
                 elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_memory_address(instruction, 1, asize)
                     op2value = self.get_register32("EAX")
-                    
+
                     # Do logic
                     op1valuederef = self.get_memory(op1value, osize)
-                    
+
                     result = op2value * op1valuederef
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register32("EDX", high)
                     self.set_register32("EAX", low)
-                    
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5406,7 +5408,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -5426,7 +5428,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5451,7 +5453,7 @@ class PyCPU:
             result = self.sanitize_value(result, osize)
 
             self.set_register(op1.reg, result, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5471,9 +5473,9 @@ class PyCPU:
 
                 # Do logic
                 op2value = 1
-                
+
                 result = op1value + op2value
-                
+
                 oldcf = self.CF
 
                 self.set_flags("INC", op1value, op2value, result, osize)
@@ -5488,9 +5490,9 @@ class PyCPU:
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
                 op2value = 1
-                
+
                 result = op1valuederef + op2value
-                
+
                 oldcf = self.CF
 
                 self.set_flags("INC", op1valuederef, op2value, result, osize)
@@ -5499,7 +5501,7 @@ class PyCPU:
                 result = self.sanitize_value(result, osize)
 
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5518,9 +5520,9 @@ class PyCPU:
 
                 # Do logic
                 op2value = 1
-                
+
                 result = op1value + op2value
-                
+
                 oldcf = self.CF
 
                 self.set_flags("INC", op1value, op2value, result, osize)
@@ -5529,26 +5531,26 @@ class PyCPU:
                 result = self.sanitize_value(result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
                 op2value = 1
-                
+
                 result = op1valuederef + op2value
-                
+
                 oldcf = self.CF
 
                 self.set_flags("INC", op1value, op2value, result, osize)
-                
+
                 self.CF = oldcf
 
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5569,7 +5571,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def INT(self, instruction):
@@ -5588,7 +5590,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5603,7 +5605,7 @@ class PyCPU:
 
             if not self.dispatch_interrupt(op1value):
                 return False
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5616,11 +5618,11 @@ class PyCPU:
         #CD ib INT imm8 Trap to interrupt vector
         elif instruction.opcode == 0xcd:
             osize = 1
-            
+
             op1value = op1.immediate & self.get_mask(osize)
             if not self.dispatch_interrupt(op1value):
                 return False
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5641,7 +5643,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JA(self, instruction):
@@ -5660,7 +5662,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5682,7 +5684,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5690,7 +5692,7 @@ class PyCPU:
                 elif op2valuederef != None and op1valuederef == None:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
-                    self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)        
+                    self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
         #0F 87 cw/cd JA rel16/32 Jump near if above (CF=0 and ZF=0)
         elif instruction.opcode == 0x87:
 
@@ -5704,7 +5706,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5724,7 +5726,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -5744,7 +5746,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5766,7 +5768,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5775,7 +5777,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                            
+
         #0F 82 cw/cd JB rel16/32 Jump near if below (CF=1)
         elif instruction.opcode == 0x82:
 
@@ -5789,7 +5791,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5798,7 +5800,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -5810,7 +5812,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JBE(self, instruction):
@@ -5829,7 +5831,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5851,7 +5853,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5874,7 +5876,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5895,7 +5897,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JNA(self, instruction):
@@ -5914,7 +5916,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -5936,7 +5938,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5959,7 +5961,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -5980,9 +5982,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def JG(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -5999,7 +6001,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6021,7 +6023,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6030,7 +6032,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                            
+
         #0F 8F cw/cd JG rel16/32 Jump near if greater (ZF=0 and SF=OF)
         elif instruction.opcode == 0x8f:
 
@@ -6044,7 +6046,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6053,7 +6055,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                            
+
         else:
             return False
 
@@ -6065,7 +6067,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JGE(self, instruction):
@@ -6084,7 +6086,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6106,7 +6108,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6129,7 +6131,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6150,7 +6152,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JNL(self, instruction):
@@ -6169,7 +6171,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6191,7 +6193,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6214,7 +6216,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6235,7 +6237,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JL(self, instruction):
@@ -6254,7 +6256,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6276,7 +6278,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6285,7 +6287,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                            
+
         #0F 8C cw/cd JL rel16/32 Jump near if less (SF<>OF)
         elif instruction.opcode == 0x8c:
 
@@ -6299,7 +6301,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-        
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6308,7 +6310,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                            
+
         else:
             return False
 
@@ -6320,7 +6322,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -6340,7 +6342,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6362,7 +6364,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6386,7 +6388,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6407,7 +6409,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JNG(self, instruction):
@@ -6426,7 +6428,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6448,7 +6450,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6473,7 +6475,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6494,7 +6496,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JMP(self, instruction):
@@ -6513,7 +6515,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6562,7 +6564,7 @@ class PyCPU:
             osize = 1
 
             op1value = op1.immediate
-            
+
             # Do logic
             result = self.get_register32("EIP") + instruction.length + (op1value)
 
@@ -6596,7 +6598,7 @@ class PyCPU:
                 result = self.get_memory(op1value, osize)
 
                 self.set_register32("EIP", result)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6633,7 +6635,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JC(self, instruction):
@@ -6652,7 +6654,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6661,7 +6663,7 @@ class PyCPU:
 
         #72 cb JC rel8 Valid Valid Jump short if carry (CF=1).
         if instruction.opcode == 0x72:
-            
+
             osize = 1
 
             op1value = op1.immediate
@@ -6674,7 +6676,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6698,7 +6700,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6719,7 +6721,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-        
+
         return True
 
 
@@ -6759,7 +6761,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-               
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6796,7 +6798,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6818,7 +6820,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6862,10 +6864,10 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
-        
+
     def JNB(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -6882,7 +6884,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6904,7 +6906,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -6948,7 +6950,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -6968,7 +6970,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -6990,7 +6992,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -7034,7 +7036,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JNZ(self, instruction):
@@ -7053,7 +7055,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7075,7 +7077,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -7116,7 +7118,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -7136,7 +7138,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7158,7 +7160,7 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-    
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -7167,7 +7169,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #0F 88 cw/cd JS rel16/32 Jump near if sign (SF=1)
         elif instruction.opcode == 0x88:
 
@@ -7190,7 +7192,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -7202,7 +7204,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -7222,7 +7224,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7249,7 +7251,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #74 cb JZ rel8 Jump short if zero (ZF = 1)
         elif instruction.opcode == 0x74:
 
@@ -7260,7 +7262,7 @@ class PyCPU:
             # Do logic
             if self.ZF:
                 result = self.get_register32("EIP") + instruction.length + op1value
-                
+
                 self.set_register32("EIP", result)
 
             opcode = instruction.opcode
@@ -7271,7 +7273,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -7283,7 +7285,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JP(self, instruction):
@@ -7302,14 +7304,14 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
 
-        # 0F 8A cw JP rel16  Valid Jump near if parity (PF=1). Not supported in 64-bit mode.  
+        # 0F 8A cw JP rel16  Valid Jump near if parity (PF=1). Not supported in 64-bit mode.
         # 0F 8A cd JP rel32 Valid Valid Jump near if parity (PF=1).
         if instruction.opcode == 0x8A:
 
@@ -7329,7 +7331,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         # 7A cb JP rel8 Jump short if parity (PF=1).
         elif instruction.opcode == 0x7A:
 
@@ -7340,7 +7342,7 @@ class PyCPU:
             # Do logic
             if self.PF:
                 result = self.get_register32("EIP") + instruction.length + op1value
-                
+
                 self.set_register32("EIP", result)
 
             opcode = instruction.opcode
@@ -7351,7 +7353,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -7363,7 +7365,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JNP(self, instruction):
@@ -7382,7 +7384,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7408,7 +7410,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         # 7B cb JNP rel8 Jump short if not parity (PF=0).
         elif instruction.opcode == 0x7B:
 
@@ -7419,7 +7421,7 @@ class PyCPU:
             # Do logic
             if not self.PF:
                 result = self.get_register32("EIP") + instruction.length + op1value
-                
+
                 self.set_register32("EIP", result)
 
             opcode = instruction.opcode
@@ -7430,7 +7432,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -7442,7 +7444,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def JPE(self, instruction):
@@ -7451,17 +7453,17 @@ class PyCPU:
 
         oo = instruction.operand_so()
         ao = instruction.address_so()
- 
+
         if oo:
             osize = 2
         else:
             osize = 4
- 
+
         if ao:
             asize = 2
         else:
             asize = 4
- 
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7476,7 +7478,7 @@ class PyCPU:
                 result = self.get_register32("EIP") + instruction.length + op1value
 
                 self.set_register32("EIP", result)
- 
+
             opcode = 0x0f << 7 | instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -7506,7 +7508,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
         else:
             return False
- 
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -7535,7 +7537,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7561,7 +7563,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         # 7B cb JPO rel8 Jump short if parity odd (PF=0).
         elif instruction.opcode == 0x7B:
 
@@ -7572,7 +7574,7 @@ class PyCPU:
             # Do logic
             if not self.PF:
                 result = self.get_register32("EIP") + instruction.length + op1value
-                
+
                 self.set_register32("EIP", result)
 
             opcode = instruction.opcode
@@ -7583,7 +7585,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -7595,7 +7597,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -7615,7 +7617,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7623,13 +7625,13 @@ class PyCPU:
         op2valuederef = None
 
         #print "%x - %x" % (self.EIP, instruction.opcode)
-        
+
         #8D /r LEA r16,m Store effective address for m in register r16
         #8D /r LEA r32,m Store effective address for m in register r32
         if instruction.opcode == 0x8d:
 
             op2value = self.get_memory_address(instruction, 2, asize)
-            
+
             # Do logic
             self.set_register(op1.reg, op2value, osize)
 
@@ -7653,7 +7655,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -7673,7 +7675,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -7711,7 +7713,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def LODSB(self, instruction):
@@ -8036,7 +8038,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -8048,7 +8050,7 @@ class PyCPU:
 
             op1value = op1.immediate
             count = self.get_register(1, osize) - 1
-            
+
             # Do logic
             if count:
                 eip = self.get_register32("EIP") + instruction.length + op1value
@@ -8057,9 +8059,9 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-            
+
             self.set_register("ECX", count, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8079,7 +8081,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -8099,7 +8101,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -8111,7 +8113,7 @@ class PyCPU:
 
             op1value = op1.immediate
             count = self.get_register("ECX", osize) - 1
-            
+
             # Do logic
             if count and self.ZF:
                 eip = self.get_register32("EIP") + instruction.length + op1value
@@ -8120,9 +8122,9 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-            
+
             self.set_register("ECX", count, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8142,7 +8144,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -8162,7 +8164,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -8174,7 +8176,7 @@ class PyCPU:
 
             op1value = op1.immediate
             count = self.get_register("ECX", osize) - 1
-            
+
             # Do logic
             if count and not self.ZF:
                 eip = self.get_register32("EIP") + instruction.length + op1value
@@ -8183,9 +8185,9 @@ class PyCPU:
                     eip = eip & 0xffff
 
                 self.set_register32("EIP", eip)
-            
+
             self.set_register("ECX", count, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8205,7 +8207,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -8225,7 +8227,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-        
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -8372,12 +8374,12 @@ class PyCPU:
                     fs = self.get_register16("FS")
                     offset = op2.displacement
                     baseaddress = self.emu.get_selector(fs).base
-                    
+
                     # This is the address pointed to by the selector
                     op1value = baseaddress + offset
                 else:
                     op1value = self.get_memory_address(instruction, 1, asize)
-                    
+
                 self.set_memory(op1value, op2value, osize)
 
             opcode = instruction.opcode
@@ -8421,7 +8423,7 @@ class PyCPU:
         #8B /r MOV r16,r/m16 Move r/m16 to r16
         #8B /r MOV r32,r/m32 Move r/m32 to r32
         elif instruction.opcode == 0x8b:
-            
+
             op1value = self.get_register(op1.reg, osize)
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
@@ -8445,7 +8447,7 @@ class PyCPU:
                 op2valuederef = self.get_memory(op2value, osize)
 
                 self.set_register(op1.reg, op2valuederef, osize)
-    
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8497,14 +8499,14 @@ class PyCPU:
         #A1 MOV AX,moffs16* Move word at (seg:offset) to AX
         #A1 MOV EAX,moffs32* Move doubleword at (seg:offset) to EAX
         elif instruction.opcode == 0xa1:
-                
+
             # Do logic
             # We are going to just get fs for now
             if instruction.fs_override():
                 fs = self.get_register16("FS")
                 offset = op2.displacement
                 baseaddress = self.emu.get_selector(fs).base
-                
+
                 # This is the address the selector points to
                 op2value = baseaddress + offset
                 op2valuederef = self.get_memory(op2value, osize)
@@ -8513,9 +8515,9 @@ class PyCPU:
                 op2value = self.get_memory_address(instruction, 2, asize)
                 offset = op2.displacement
                 op2valuederef = self.get_memory(op2value + offset, osize)
-                
+
                 self.set_register(0, op2valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8530,20 +8532,20 @@ class PyCPU:
         elif instruction.opcode == 0xa3:
 
             op2value = self.get_register(0, osize)
-            
+
             # Do logic
             # We are going to just get fs for now
             if instruction.fs_override():
                 fs = self.get_register16("FS")
                 offset = op2.displacement
                 baseaddress = self.emu.get_selector(fs).base
-                
+
                 self.set_memory(baseaddress + offset, op2value, osize)
             else:
                 #print "[!] Please add this segment"
-                
+
                 return False
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8555,7 +8557,7 @@ class PyCPU:
 
         #B0+ rb MOV r8,imm8 Move imm8 to r8
         elif instruction.opcode >= 0xb0 and instruction.opcode <= 0xb7:
-            
+
             osize = 1
 
             op1value = self.get_register(op1.reg, osize)
@@ -8608,7 +8610,7 @@ class PyCPU:
 
                 # Do logic
                 self.set_memory(op1value, op2value, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8656,7 +8658,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -8676,7 +8678,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -8731,13 +8733,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def MOVSB(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -8750,89 +8752,89 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #A4 MOVSB
         if instruction.opcode == 0xa4:
             osize = 1
-            
+
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.DS + self.get_register16("SI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                             self.set_register16("SI", op2value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
                             self.set_register16("SI", op2value - osize)
-                    
-                        
+
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.DS + self.get_register16("SI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                         self.set_register16("SI", op2value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
                         self.set_register16("SI", op2value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register32("ESI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                             self.set_register32("ESI", op2value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
                             self.set_register32("ESI", op2value - osize)
-                    
-                        
+
+
                         repcount -= 1
-                        
+
                     self.set_register32("ECX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register32("ESI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                         self.set_register32("ESI", op2value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
                         self.set_register32("ESI", op2value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8844,7 +8846,7 @@ class PyCPU:
 
         else:
             return False
-        
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -8853,13 +8855,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def MOVSW(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -8872,88 +8874,88 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #A5 MOVSW
         if instruction.opcode == 0xa5:
             osize = 2
-            
+
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.DS + self.get_register16("SI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                             self.set_register16("SI", op2value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
                             self.set_register16("SI", op2value - osize)
-                    
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.DS + self.get_register16("SI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                         self.set_register16("SI", op2value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
                         self.set_register16("SI", op2value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register32("ESI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                             self.set_register32("ESI", op2value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
                             self.set_register32("ESI", op2value - osize)
-                    
-                        
+
+
                         repcount -= 1
-                        
+
                     self.set_register32("ECX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register32("ESI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                         self.set_register32("ESI", op2value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
                         self.set_register32("ESI", op2value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -8974,13 +8976,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                        
+
         return True
 
     def MOVSD(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -8993,87 +8995,87 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #A5 MOVSD
         if instruction.opcode == 0xa5:
             osize = 4
-            
+
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.DS + self.get_register16("SI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                             self.set_register16("SI", op2value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
                             self.set_register16("SI", op2value - osize)
-                    
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.DS + self.get_register16("SI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                         self.set_register16("SI", op2value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
                         self.set_register16("SI", op2value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register32("ECX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register32("ESI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
                         self.set_memory(op1value, op2valuederef, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                             self.set_register32("ESI", op2value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
                             self.set_register32("ESI", op2value - osize)
-                    
+
                         repcount -= 1
-                        
+
                     self.set_register32("ECX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register32("ESI")
-                    
+
                     op2valuederef = self.get_memory(op2value, osize)
                     self.set_memory(op1value, op2valuederef, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                         self.set_register32("ESI", op2value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
                         self.set_register32("ESI", op2value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -9094,7 +9096,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                        
+
         return True
 
 
@@ -9114,7 +9116,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9129,18 +9131,18 @@ class PyCPU:
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                 op2value = self.get_register(op2.reg, 1)
-                
+
                 result = self.sign_extend(op2value, 1, osize)
-    
+
                 self.set_register(op1.reg, result, osize)
-            
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 op2value = self.get_memory_address(instruction, 2, asize)
-                
+
                 op2valuederef = self.get_memory(op2value, 1)
-                
+
                 result = self.sign_extend(op2valuederef, 1, osize)
-    
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -9159,17 +9161,17 @@ class PyCPU:
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                 op2value = self.get_register(op2.reg, 2)
-                
+
                 result = self.sign_extend(op2value, 2, osize)
-    
+
                 self.set_register(op1.reg, result, osize)
-            
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 op2value = self.get_memory_address(instruction, 2, asize)
-                
+
                 op2valuederef = self.get_memory(op2value, 2)
                 result = self.sign_extend(op2valuederef, 2, osize)
-    
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -9192,7 +9194,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -9212,7 +9214,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9227,18 +9229,18 @@ class PyCPU:
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                 op2value = self.get_register(op2.reg, 1)
-                
+
                 result = op2value
-    
+
                 self.set_register(op1.reg, result, osize)
-            
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 op2value = self.get_memory_address(instruction, 2, asize)
-                
+
                 op2valuederef = self.get_memory(op2value, 1)
-                
+
                 result = op2valuederef
-    
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -9257,18 +9259,18 @@ class PyCPU:
 
             if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                 op2value = self.get_register(op2.reg, 2)
-                
+
                 result = op2value
-    
+
                 self.set_register(op1.reg, result, osize)
-            
+
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                 op2value = self.get_memory_address(instruction, 2, asize)
-                
+
                 op2valuederef = self.get_memory(op2value, 2)
-                
+
                 result = op2valuederef
-    
+
                 self.set_register(op1.reg, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -9291,7 +9293,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -9311,7 +9313,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9326,27 +9328,27 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("AL")
-                
+
                 # Do logic
                 result = op2value * op1value
-                
+
                 self.OF = 0
                 self.CF = 0
-                
+
                 self.set_register16("AX", result)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("AL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op2value * op1valuederef
-                
+
                 self.OF = 0
                 self.CF = 0
-                
+
                 self.set_register16("AX", result)
 
             opcode = instruction.opcode
@@ -9359,94 +9361,94 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
 
         #F7 /4 MUL r/m16 Unsigned multiply (DX:AX . AX * r/m16)
-        #F7 /4 MUL r/m32 Unsigned multiply (EDX:EAX . EAX * r/m32) 
+        #F7 /4 MUL r/m32 Unsigned multiply (EDX:EAX . EAX * r/m32)
         elif instruction.opcode == 0xf7 and instruction.extindex == 0x4:
 
             if osize == 2:
                 if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register16("AX")
-                
+
                     # Do logic
                     result = op2value * op1value
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register16("DX", high)
                     self.set_register16("AX", low)
-    
+
                 elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_memory_address(instruction, 1, asize)
                     op2value = self.get_register16("AX")
-                    
+
                     # Do logic
                     op1valuederef = self.get_memory(op1value, osize)
-                    
+
                     result = op2value * op1valuederef
-                    
+
                     high = (result >> 16)
                     low = (result & 0xffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register16("DX", high)
                     self.set_register16("AX", low)
             else:
                 if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register32("EAX")
-                
+
                     # Do logic
                     result = op2value * op1value
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register32("EDX", high)
                     self.set_register32("EAX", low)
-    
+
                 elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_memory_address(instruction, 1, asize)
                     op2value = self.get_register32("EAX")
-                    
+
                     # Do logic
                     op1valuederef = self.get_memory(op1value, osize)
-                    
+
                     result = op2value * op1valuederef
-                    
+
                     high = (result >> 32)
                     low = (result & 0xffffffff)
-                    
+
                     if high:
                         self.OF = 1
                         self.CF = 1
                     else:
                         self.OF = 0
                         self.CF = 0
-                    
+
                     self.set_register32("EDX", high)
                     self.set_register32("EAX", low)
-                    
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -9467,7 +9469,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def NEG(self, instruction):
@@ -9486,7 +9488,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9576,7 +9578,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -9596,7 +9598,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9611,7 +9613,7 @@ class PyCPU:
                 self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -9620,7 +9622,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         #90 NOP No operation
         return True
 
@@ -9641,7 +9643,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9730,7 +9732,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -9750,7 +9752,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -9794,7 +9796,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #09 /r OR r/m16,r16 r/m16  r16
         #09 /r OR r/m32,r32 r/m32  r32
         elif instruction.opcode == 0x09:
@@ -9861,7 +9863,7 @@ class PyCPU:
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
 
- 
+
         #0B /r OR r16,r/m16 r16  r/m16
         #0B /r OR r32,r/m32 r32  r/m32
         elif instruction.opcode == 0x0b:
@@ -9898,7 +9900,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #0C ib OR AL,imm8 AL  imm8
         elif instruction.opcode == 0x0c:
 
@@ -9922,7 +9924,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #0D id OR EAX,imm32 EAX  imm32
         #0D iw OR AX,imm16 AX  imm16
         elif instruction.opcode == 0x0d:
@@ -9981,7 +9983,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #83 /1 ib OR r/m16,imm8 r/m16  imm8 (sign-extended)
         #83 /1 ib OR r/m32,imm8 r/m32  imm8 (sign-extended)
         elif instruction.opcode == 0x83 and instruction.extindex == 0x1:
@@ -10018,7 +10020,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         else:
             return False
 
@@ -10030,7 +10032,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -10050,7 +10052,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10168,7 +10170,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def POPA(self, instruction):
@@ -10187,7 +10189,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10204,47 +10206,47 @@ class PyCPU:
             value = self.get_memory32(esp)
             self.set_register(7, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # ESI
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(6, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # EBP
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(5, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # ESP
             esp = self.get_register32("ESP")
             self.set_register32("ESP", esp + osize)
-            
+
             # EBX
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(3, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # EDX
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(2, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # ECX
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(1, value, osize)
             self.set_register32("ESP", esp + osize)
-            
+
             # EAX
             esp = self.get_register32("ESP")
             value = self.get_memory32(esp)
             self.set_register(0, value, osize)
             self.set_register32("ESP", esp + osize)
-           
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -10264,9 +10266,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def POPF(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -10283,7 +10285,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10307,33 +10309,33 @@ class PyCPU:
                 self.PF = 1
             if popvalue & self.eflags_map["AF"]:
                 self.AF = 1
-            if popvalue & self.eflags_map["ZF"]: 
+            if popvalue & self.eflags_map["ZF"]:
                 self.ZF = 1
-            if popvalue & self.eflags_map["SF"]: 
+            if popvalue & self.eflags_map["SF"]:
                 self.SF = 1
-            if popvalue & self.eflags_map["TF"]: 
+            if popvalue & self.eflags_map["TF"]:
                 self.TF = 1
-            if popvalue & self.eflags_map["IF"]: 
+            if popvalue & self.eflags_map["IF"]:
                 self.IF = 1
-            if popvalue & self.eflags_map["DF"]: 
+            if popvalue & self.eflags_map["DF"]:
                 self.DF = 1
-            if popvalue & self.eflags_map["OF"]: 
+            if popvalue & self.eflags_map["OF"]:
                 self.OF = 1
-            if popvalue & self.eflags_map["IOPL"]: 
+            if popvalue & self.eflags_map["IOPL"]:
                 self.IOPL = 1
-            if popvalue & self.eflags_map["NT"]: 
+            if popvalue & self.eflags_map["NT"]:
                 self.NT = 1
-            if popvalue & self.eflags_map["RF"]: 
+            if popvalue & self.eflags_map["RF"]:
                 self.RF = 1
-            if popvalue & self.eflags_map["VM"]: 
+            if popvalue & self.eflags_map["VM"]:
                 self.VM = 1
-            if popvalue & self.eflags_map["AC"]: 
+            if popvalue & self.eflags_map["AC"]:
                 self.AC = 1
-            if popvalue & self.eflags_map["VIF"]: 
+            if popvalue & self.eflags_map["VIF"]:
                 self.VIF = 1
-            if popvalue & self.eflags_map["VIP"]: 
+            if popvalue & self.eflags_map["VIP"]:
                 self.VIP = 1
-            if popvalue & self.eflags_map["ID"]: 
+            if popvalue & self.eflags_map["ID"]:
                 self.ID = 1
 
             opcode = instruction.opcode
@@ -10355,9 +10357,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
 
     def PUSH(self, instruction):
         op1 = instruction.op1
@@ -10375,7 +10377,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10472,7 +10474,7 @@ class PyCPU:
 
         #6A PUSH imm8 Push imm8
         elif instruction.opcode == 0x6a:
-            
+
             osize = 1
 
             op1value = op1.immediate & self.get_mask(osize)
@@ -10539,7 +10541,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def PUSHA(self, instruction):
@@ -10558,7 +10560,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10572,7 +10574,7 @@ class PyCPU:
             # Do logic
             # Save our esp before we start so we can push it
             temp_esp = self.get_register32("ESP")
-            
+
             # EAX
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("EAX"))
@@ -10582,32 +10584,32 @@ class PyCPU:
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("ECX"))
             self.set_register32("ESP", esp)
-            
+
             # EDX
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("EDX"))
             self.set_register32("ESP", esp)
-            
+
             # EBX
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("EBX"))
             self.set_register32("ESP", esp)
-            
+
             # ESP
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, temp_esp)
             self.set_register32("ESP", esp)
-            
+
             # EBP
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("EBP"))
             self.set_register32("ESP", esp)
-            
+
             # ESI
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("ESI"))
             self.set_register32("ESP", esp)
-            
+
             # EDI
             esp = self.get_register32("ESP") - 4
             self.set_memory32(esp, self.get_register32("EDI"))
@@ -10632,7 +10634,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def PUSHF(self, instruction):
@@ -10651,7 +10653,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10706,9 +10708,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def RCR(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -10725,7 +10727,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -10743,10 +10745,10 @@ class PyCPU:
 
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
@@ -10754,19 +10756,19 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
@@ -10774,7 +10776,7 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -10797,10 +10799,10 @@ class PyCPU:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
@@ -10808,22 +10810,22 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
@@ -10831,7 +10833,7 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -10845,17 +10847,17 @@ class PyCPU:
         elif instruction.opcode == 0xd0 and instruction.extindex == 0x3:
 
             osize = 1
-            
+
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
@@ -10863,27 +10865,27 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -10900,16 +10902,16 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
@@ -10917,30 +10919,30 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -10958,33 +10960,33 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 if op2value == 1:
                     self.OF = (op1valuederef >> 7) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
@@ -10992,7 +10994,7 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11015,10 +11017,10 @@ class PyCPU:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1value = (op1value / 2) + (self.CF * 2 ** osize)
@@ -11026,22 +11028,22 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 while tempcount:
                     tempcf = self.get_lsb(op2value)
                     op1valuederef = (op1valuederef / 2) + (self.CF * 2 ** osize)
@@ -11049,7 +11051,7 @@ class PyCPU:
                     tempcount -= 1
 
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11070,7 +11072,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def RCL(self, instruction):
@@ -11089,7 +11091,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -11107,27 +11109,27 @@ class PyCPU:
 
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 while tempcount:
                     tempcf = self.get_msb(op1value, osize)
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & 0xff
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
-                
+
                 while tempcount:
                     tempcf = self.get_msb(op1valuederef, osize)
                     op1valuederef = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
@@ -11136,9 +11138,9 @@ class PyCPU:
 
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11167,35 +11169,35 @@ class PyCPU:
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-    
+
                 while tempcount:
                     tempcf = self.get_msb(op1valuederef, osize)
                     op1value = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-            
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11209,45 +11211,45 @@ class PyCPU:
         elif instruction.opcode == 0xd0 and instruction.extindex == 0x2:
 
             osize = 1
-            
+
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
- 
+
                 while tempcount:
                     tempcf = self.get_msb(op1value, osize)
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-               
+
                 self.set_register(op1.reg, op1value, osize)
-                               
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
-       
+
                 while tempcount:
                     tempcf = self.get_msb(op1valuederef, osize)
                     op1valuederef = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                         
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11264,7 +11266,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
@@ -11276,35 +11278,35 @@ class PyCPU:
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
                     tempcount = op2value & 0x1f
-   
+
                 while tempcount:
                     tempcf = self.get_msb(op1valuederef, osize)
                     op1valuederef = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11322,7 +11324,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 9
 
@@ -11331,19 +11333,19 @@ class PyCPU:
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 9
 
                 while tempcount:
@@ -11351,12 +11353,12 @@ class PyCPU:
                     op1valuederef = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                
+
                 if op2value == 1:
                     self.OF = (op1valuederef >> 7) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11385,19 +11387,19 @@ class PyCPU:
                     op1value = ((op1value * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 17
                 else:
@@ -11408,12 +11410,12 @@ class PyCPU:
                     op1valuederef = ((op1valuederef * 2) + self.CF) & self.get_mask(osize)
                     self.CF = tempcf
                     tempcount -= 1
-                    
+
                 if op2value == 1:
                     self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11434,13 +11436,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def RET(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -11453,17 +11455,17 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #C3 RET Valid Valid Near return to calling procedure.
         if instruction.opcode == 0xc3:
             osize = 4
-            
+
             eip = self.get_memory32(self.get_register32("ESP"))
             esp = self.get_register32("ESP") + osize
 
@@ -11483,7 +11485,7 @@ class PyCPU:
         elif instruction.opcode == 0xcb:
             #print "[!] We dont support far cross segment returns!"
             return False
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11496,15 +11498,15 @@ class PyCPU:
         #C2 iw RET imm16 Valid Valid Near return to calling procedure and pop imm16 bytes from stack.
         elif instruction.opcode == 0xc2:
             osize = 4
-            
+
             op1value = op1.immediate & self.get_mask(2)
-            
+
             eip = self.get_memory32(self.get_register32("ESP"))
             esp = self.get_register32("ESP") + op1value + osize
-            
+
             self.set_register32("EIP", eip)
             self.set_register32("ESP", esp)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11518,7 +11520,7 @@ class PyCPU:
         elif instruction.opcode == 0xca:
             #print "[!] We dont support far cross segment returns!"
             return False
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11530,7 +11532,7 @@ class PyCPU:
 
         else:
             return False
-        
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -11539,9 +11541,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-    
+
     def ROL(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -11558,7 +11560,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -11576,42 +11578,42 @@ class PyCPU:
 
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
-                
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
-                
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1value = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11640,39 +11642,39 @@ class PyCPU:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
                     tempcount = (op2value & 0x1f) % 32
-    
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1valuederef = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11684,51 +11686,51 @@ class PyCPU:
 
         #D0 /0 ROL r/m8, 1 Rotate 16 bits (CF, r/m16) left once
         elif instruction.opcode == 0xd0 and instruction.extindex == 0x0:
-            
+
             osize = 1
-            
+
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
- 
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-               
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
-       
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1valuederef = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                         
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11745,7 +11747,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
@@ -11757,39 +11759,39 @@ class PyCPU:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
                     tempcount = (op2value & 0x1f) % 32
-   
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1valuederef = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11807,7 +11809,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
 
@@ -11816,21 +11818,21 @@ class PyCPU:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
 
                 if tempcount > 0:
@@ -11838,14 +11840,14 @@ class PyCPU:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1valuederef = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11874,21 +11876,21 @@ class PyCPU:
                         tempcf = self.get_msb(op1value, osize)
                         op1value = ((op1value << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1value)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ self.CF
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
@@ -11899,14 +11901,14 @@ class PyCPU:
                         tempcf = self.get_msb(op1valuederef, osize)
                         op1valuederef = ((op1valuederef << 1) + tempcf) & self.get_mask(osize)
                         tempcount -= 1
-                        
+
                     self.CF = self.get_lsb(op1valuederef)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ self.CF
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -11927,7 +11929,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def ROR(self, instruction):
@@ -11946,7 +11948,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -11964,42 +11966,42 @@ class PyCPU:
 
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
-                
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
-                
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12028,39 +12030,39 @@ class PyCPU:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
                     tempcount = (op2value & 0x1f) % 32
-    
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1valuederef, osize) - 1)
 
                 self.set_memory(op1value, op1valuederef, osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12072,51 +12074,51 @@ class PyCPU:
 
         #D0 /1 ROR r/m8, 1 Rotate 16 bits (CF, r/m16) right once
         elif instruction.opcode == 0xd0 and instruction.extindex == 0x1:
-            
+
             osize = 1
-            
+
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
- 
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-               
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
-       
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf  << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1valuederef, osize) - 1)
-                
+
                 self.set_memory(op1value, op1valuederef, osize)
-                         
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12133,7 +12135,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
@@ -12145,39 +12147,39 @@ class PyCPU:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
                     tempcount = (op2value & 0x1f) % 32
-   
+
                 if tempcount > 0:
                     while tempcount:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1valuederef, osize) - 1)
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12195,7 +12197,7 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 tempcount = (op2value & 0x1f) % 8
 
@@ -12204,21 +12206,21 @@ class PyCPU:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 tempcount = (op2value & 0x1f) % 8
 
                 if tempcount > 0:
@@ -12226,14 +12228,14 @@ class PyCPU:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1valuederef, osize) - 1)
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12262,21 +12264,21 @@ class PyCPU:
                         tempcf = self.get_lsb(op1value)
                         op1value = (op1value >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1value, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1value, osize) ^ (self.get_msb(op1value, osize) - 1)
-                
+
                 self.set_register(op1.reg, op1value, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 if osize == 2:
                     tempcount = (op2value & 0x1f) % 16
                 else:
@@ -12287,14 +12289,14 @@ class PyCPU:
                         tempcf = self.get_lsb(op1valuederef)
                         op1valuederef = (op1valuederef >> 1) + (tempcf << (osize * 8 - 1))
                         tempcount -= 1
-                        
+
                     self.CF = self.get_msb(op1valuederef, osize)
-                    
+
                     if op2value == 1:
                         self.OF = self.get_msb(op1valuederef, osize) ^ (self.get_msb(op1valuederef, osize) - 1)
-             
+
                 self.set_memory(op1value, op1valuederef, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12315,7 +12317,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SAL(self, instruction):
@@ -12334,7 +12336,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -12352,7 +12354,7 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -12363,27 +12365,27 @@ class PyCPU:
                 self.set_flags("SAL", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12403,14 +12405,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12421,16 +12423,16 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12455,14 +12457,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12473,20 +12475,20 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12503,17 +12505,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = 1
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12521,19 +12523,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = 1
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12555,17 +12557,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12573,19 +12575,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12606,37 +12608,37 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1value, op2value, result, osize)
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SAL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12661,9 +12663,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-                        
+
     def SAR(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -12680,7 +12682,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -12698,38 +12700,38 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = op2.immediate & self.get_mask(osize)
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12749,14 +12751,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12767,16 +12769,16 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12801,14 +12803,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12819,20 +12821,20 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -12849,17 +12851,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = 1
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12867,19 +12869,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = 1
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12901,17 +12903,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12919,19 +12921,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -12952,17 +12954,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -12970,19 +12972,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result / 2
                     tempcount -= 1
-                
+
                 self.set_flags("SAR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -13007,7 +13009,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-        
+
         return True
 
     def SBB(self, instruction):
@@ -13026,7 +13028,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13045,12 +13047,12 @@ class PyCPU:
                 # Do logic
                 result = op1value - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13059,15 +13061,15 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1valuederef, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -13090,12 +13092,12 @@ class PyCPU:
                 # Do logic
                 result = op1value - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13104,15 +13106,15 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1valuederef, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -13136,12 +13138,12 @@ class PyCPU:
                 # Do logic
                 result = op1value - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_register(op1.reg, result, osize)
 
             elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13149,17 +13151,17 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1valuederef, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 result = self.sanitize_value(result, osize)
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -13182,12 +13184,12 @@ class PyCPU:
             # Do logic
             result = op1value - (op2value + self.CF)
             oldcf = self.CF
-            
+
             self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
             if oldcf == 0:
                 self.CF = oldcf
-                    
+
             self.set_register(0, result, osize)
 
             opcode = instruction.opcode
@@ -13209,12 +13211,12 @@ class PyCPU:
             # Do logic
             result = op1value - (op2value + self.CF)
             oldcf = self.CF
-            
+
             self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
             if oldcf == 0:
                 self.CF = oldcf
-                    
+
             self.set_register(0, result, osize)
 
             opcode = instruction.opcode
@@ -13237,12 +13239,12 @@ class PyCPU:
                 # Do logic
                 result = op1value - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13251,15 +13253,15 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1valuederef, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -13282,12 +13284,12 @@ class PyCPU:
                 # Do logic
                 result = op1value - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1value, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13296,15 +13298,15 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 result = op1valuederef - (op2value + self.CF)
                 oldcf = self.CF
-                
+
                 self.set_flags("SBB", op1valuederef, op2value + self.CF, result, osize)
-                
+
                 if oldcf == 0:
                     self.CF = oldcf
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = instruction.opcode
@@ -13327,7 +13329,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -13347,7 +13349,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13402,7 +13404,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SCASB(self, instruction):
@@ -13421,7 +13423,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13430,9 +13432,9 @@ class PyCPU:
 
         #AE SCASB Valid Valid Compare AL with byte at ES:(E)DI
         if instruction.opcode == 0xae:
-            
+
             osize = 1
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
@@ -13440,31 +13442,31 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13473,26 +13475,26 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.DS + self.get_register16("DI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2value
 
                     self.set_flags("CMP", op1value, op2value, result, osize)
-          
+
                     if not self.DF:
                         self.set_register16("DI", op2value + osize)
                     else:
                         self.set_register16("DI", op2value - osize)
-            
+
             else:
                 if instruction.repne():
                     repcount = self.get_register32("ECX")
@@ -13500,9 +13502,9 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13511,20 +13513,20 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register32("ECX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13533,26 +13535,26 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.get_register32("EDI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2valuederef
 
                     self.set_flags("CMP", op1value, op2valuederef, result, osize)
-             
+
                     if not self.DF:
                         self.set_register32("EDI", op2value + osize)
                     else:
                         self.set_register32("EDI", op2value - osize)
-                        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -13573,7 +13575,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SCASW(self, instruction):
@@ -13592,7 +13594,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13601,9 +13603,9 @@ class PyCPU:
 
         #AF SCASW Valid Valid Compare AX with byte at ES:(E)DI
         if instruction.opcode == 0xaf:
-            
+
             osize = 2
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
@@ -13611,9 +13613,9 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13622,20 +13624,20 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13644,26 +13646,26 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.DS + self.get_register16("DI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2value
 
                     self.set_flags("CMP", op1value, op2value, result, osize)
-        
+
                     if not self.DF:
                         self.set_register16("DI", op2value + osize)
                     else:
                         self.set_register16("DI", op2value - osize)
-            
+
             else:
                 if instruction.repne():
                     repcount = self.get_register32("ECX")
@@ -13671,9 +13673,9 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13682,20 +13684,20 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register32("ECX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13704,26 +13706,26 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.get_register32("EDI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2value
 
                     self.set_flags("CMP", op1value, op2value, result, osize)
-            
+
                     if not self.DF:
                         self.set_register32("EDI", op2value + osize)
                     else:
                         self.set_register32("EDI", op2value - osize)
-                        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -13744,7 +13746,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SCASD(self, instruction):
@@ -13763,7 +13765,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13772,7 +13774,7 @@ class PyCPU:
 
         #AF SCASD Valid Valid Compare EAX with byte at ES:(E)DI
         if instruction.opcode == 0xaf:
-            
+
             if ao:
                 if instruction.repne():
                     repcount = self.get_register16("CX")
@@ -13780,9 +13782,9 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13791,20 +13793,20 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register16("CX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.DS + self.get_register16("DI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13813,26 +13815,26 @@ class PyCPU:
                             self.set_register16("DI", op2value + osize)
                         else:
                             self.set_register16("DI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register16("CX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.DS + self.get_register16("DI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2value
 
                     self.set_flags("CMP", op1value, op2value, result, osize)
-                  
+
                     if not self.DF:
                         self.set_register16("DI", op2value + osize)
                     else:
                         self.set_register16("DI", op2value - osize)
-            
+
             else:
                 if instruction.repne():
                     repcount = self.get_register32("ECX")
@@ -13840,9 +13842,9 @@ class PyCPU:
                     while repcount and not self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13851,20 +13853,20 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 elif instruction.repe():
                     repcount = self.get_register32("ECX")
                     self.ZF = 1
                     while repcount and self.ZF:
                         op1value = self.get_register8("AL")
                         op2value = self.get_register32("EDI")
-                        
+
                         op2valuederef = self.get_memory(op2value, osize)
-                        
+
                         result = op1value - op2valuederef
 
                         self.set_flags("CMP", op1value, op2valuederef, result, osize)
@@ -13873,26 +13875,26 @@ class PyCPU:
                             self.set_register32("EDI", op2value + osize)
                         else:
                             self.set_register32("EDI", op2value - osize)
-                        
+
                         repcount -= 1
 
                     self.set_register32("ECX", repcount)
-                    
+
                 else:
                     op1value = self.get_register8("AL")
                     op2value = self.get_register32("EDI")
 
                     op2valuederef = self.get_memory(op2value, osize)
-                                        
+
                     result = op1value - op2value
 
                     self.set_flags("CMP", op1value, op2value, result, osize)
-               
+
                     if not self.DF:
                         self.set_register32("EDI", op2value + osize)
                     else:
                         self.set_register32("EDI", op2value - osize)
-                        
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -13913,7 +13915,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETNA(self, instruction):
@@ -13932,7 +13934,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -13952,7 +13954,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -13963,7 +13965,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -13986,9 +13988,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETLE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14005,7 +14007,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14025,7 +14027,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14036,7 +14038,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14059,9 +14061,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETGE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14078,7 +14080,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14098,7 +14100,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14109,7 +14111,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14132,9 +14134,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETG(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14151,7 +14153,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14171,7 +14173,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14182,7 +14184,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14205,9 +14207,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14224,7 +14226,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14244,7 +14246,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14255,7 +14257,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14278,9 +14280,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETC(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14297,7 +14299,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14317,7 +14319,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14328,7 +14330,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14351,9 +14353,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETBE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14370,7 +14372,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14390,7 +14392,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14401,7 +14403,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14424,9 +14426,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETB(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14443,7 +14445,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14463,7 +14465,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14474,7 +14476,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14497,9 +14499,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETAE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14516,7 +14518,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14536,7 +14538,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14547,7 +14549,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14570,9 +14572,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETA(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14589,7 +14591,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14609,7 +14611,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14620,7 +14622,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14643,9 +14645,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETPS(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14662,7 +14664,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14682,7 +14684,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14693,7 +14695,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14716,9 +14718,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETPO(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14735,7 +14737,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14755,7 +14757,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14766,7 +14768,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14789,9 +14791,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETPE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14808,7 +14810,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14828,7 +14830,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14839,7 +14841,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14862,9 +14864,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETP(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14881,7 +14883,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14901,7 +14903,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14912,7 +14914,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -14935,9 +14937,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETO(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -14954,7 +14956,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -14974,7 +14976,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -14985,7 +14987,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15008,7 +15010,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETNS(self, instruction):
@@ -15027,7 +15029,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15047,7 +15049,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15058,7 +15060,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15081,7 +15083,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETNP(self, instruction):
@@ -15100,7 +15102,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15120,7 +15122,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15131,7 +15133,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15154,7 +15156,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETNO(self, instruction):
@@ -15173,7 +15175,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15193,7 +15195,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15204,7 +15206,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15227,9 +15229,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-                
+
     def SETNL(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15246,7 +15248,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15266,7 +15268,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15277,7 +15279,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15300,9 +15302,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNGE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15319,7 +15321,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15339,7 +15341,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15350,7 +15352,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15373,9 +15375,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNG(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15392,7 +15394,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15412,7 +15414,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15423,7 +15425,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15446,9 +15448,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15465,7 +15467,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15485,7 +15487,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15496,7 +15498,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15519,9 +15521,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNC(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15538,7 +15540,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15558,7 +15560,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15569,7 +15571,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15592,9 +15594,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNBE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15611,7 +15613,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15631,7 +15633,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15642,7 +15644,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15665,9 +15667,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNB(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15684,7 +15686,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15704,7 +15706,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15715,7 +15717,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15738,9 +15740,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
-        
+
     def SETNAE(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -15757,7 +15759,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15777,7 +15779,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15788,7 +15790,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15811,7 +15813,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETL(self, instruction):
@@ -15830,7 +15832,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15850,7 +15852,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15861,7 +15863,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15884,7 +15886,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -15904,7 +15906,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15924,7 +15926,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_register(op1.reg, result, osize)
 
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -15935,7 +15937,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -15958,7 +15960,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETNZ(self, instruction):
@@ -15977,7 +15979,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -15999,7 +16001,7 @@ class PyCPU:
                     result = 0x0
 
                 self.set_register(op1.reg, result, osize)
-                
+
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
 
@@ -16008,7 +16010,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -16031,7 +16033,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SETZ(self, instruction):
@@ -16050,7 +16052,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -16081,7 +16083,7 @@ class PyCPU:
                     result = 0x1
                 else:
                     result = 0x0
-                    
+
                 self.set_memory(op1value, result, osize)
 
             opcode = 0x0f << 7 | instruction.opcode
@@ -16104,7 +16106,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SHL(self, instruction):
@@ -16123,7 +16125,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -16141,7 +16143,7 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16161,14 +16163,14 @@ class PyCPU:
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16192,7 +16194,7 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16212,14 +16214,14 @@ class PyCPU:
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16241,10 +16243,10 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = 1
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16259,19 +16261,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op1value = 1
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16284,7 +16286,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                    
+
         #D1 /4 SHL r/m16 Multiply r/m16 by 2, 1 time
         #D1 /4 SHL r/m32 Multiply r/m32 by 2, 1 time
         elif instruction.opcode == 0xd1 and instruction.extindex == 0x4:
@@ -16292,10 +16294,10 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = 1
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16310,19 +16312,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op1value = 1
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16344,10 +16346,10 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16362,19 +16364,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16395,10 +16397,10 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
@@ -16413,19 +16415,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_msb(result, osize)
                     result = (result * 2) & self.get_mask(osize)
                     tempcount -= 1
-                
+
                 self.set_flags("SHL", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16450,7 +16452,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SHR(self, instruction):
@@ -16469,7 +16471,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -16487,14 +16489,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -16507,14 +16509,14 @@ class PyCPU:
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16538,14 +16540,14 @@ class PyCPU:
 
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -16558,14 +16560,14 @@ class PyCPU:
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16586,17 +16588,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = 1
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -16604,19 +16606,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = 1
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16638,17 +16640,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -16656,19 +16658,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16689,17 +16691,17 @@ class PyCPU:
             if op1.type == pydasm.OPERAND_TYPE_REGISTER:
                 op1value = self.get_register(op1.reg, osize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 countmask = 0x1f
-                
+
                 result = op1value
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1value, op2value, result, osize)
 
                 self.set_register(op1.reg, result, osize)
@@ -16707,19 +16709,19 @@ class PyCPU:
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
                 op1value = self.get_memory_address(instruction, 1, asize)
                 op2value = self.get_register8("CL")
-                
+
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
 
                 countmask = 0x1f
-                
+
                 result = op1valuederef
                 tempcount = op2value & countmask
                 while tempcount:
                     self.CF = self.get_lsb(result)
                     result = result >> 1
                     tempcount -= 1
-                
+
                 self.set_flags("SHR", op1valuederef, op2value, result, osize)
 
                 self.set_memory(op1value, result, osize)
@@ -16744,7 +16746,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def STD(self, instruction):
@@ -16763,7 +16765,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -16796,7 +16798,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def STOS(self, instruction):
@@ -16815,17 +16817,17 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #AA STOS m8
         if instruction.opcode == 0xaa:
             return False
-                
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -16840,7 +16842,7 @@ class PyCPU:
         elif instruction.opcode == 0xab:
 
             return False
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -16861,13 +16863,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                        
+
         return False
-    
+
     def STOSB(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -16880,78 +16882,78 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #AA STOSB
         if instruction.opcode == 0xaa:
-            
+
             osize = 1
-            
+
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
-                    
-                        
+
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
-                    
-                        
+
+
                         repcount -= 1
-                        
+
                     self.set_register32("CX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -16972,13 +16974,13 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                 
+
         return True
-    
+
     def STOSW(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
-        
+
         oo = instruction.operand_so()
         ao = instruction.address_so()
 
@@ -16991,78 +16993,78 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #AB STOSW
         if instruction.opcode == 0xab:
-            
+
             osize = 2
-            
+
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
-                    
-                    
+
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
-                    
-                    
+
+
                         repcount -= 1
-                        
+
                     self.set_register32("ECX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -17083,9 +17085,9 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                 
+
         return True
-    
+
     def STOSD(self, instruction):
         op1 = instruction.op1
         op2 = instruction.op2
@@ -17102,73 +17104,73 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
         op1valuederef = None
         op2valuederef = None
-        
+
         #AB STOSD
         if instruction.opcode == 0xab:
             if ao:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.ES + self.get_register16("DI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register16("DI", op1value + osize)
                         else:
                             self.set_register16("DI", op1value - osize)
-                    
+
                         repcount -= 1
-                        
+
                     self.set_register16("CX", repcount)
                 else:
                     op1value = self.ES + self.get_register16("DI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register16("DI", op1value + osize)
                     else:
                         self.set_register16("DI", op1value - osize)
-            
+
             else:
                 if instruction.rep():
                     repcount = self.get_register16("CX")
-                    
+
                     while repcount > 0:
                         op1value = self.get_register32("EDI")
                         op2value = self.get_register(0, osize)
-                        
+
                         self.set_memory(op1value, op2value, osize)
-                        
+
                         if not self.DF:
                             self.set_register32("EDI", op1value + osize)
                         else:
                             self.set_register32("EDI", op1value - osize)
-                    
+
                         repcount -= 1
-                        
+
                     self.set_register32("ECX", repcount)
                 else:
                     op1value = self.get_register32("EDI")
                     op2value = self.get_register(0, osize)
-                    
+
                     self.set_memory(op1value, op2value, osize)
-                    
+
                     if not self.DF:
                         self.set_register32("EDI", op1value + osize)
                     else:
                         self.set_register32("EDI", op1value - osize)
-            
+
             opcode = instruction.opcode
             if opcode in self.emu.opcode_handlers:
                 if op1valuederef != None and op2valuederef == None:
@@ -17180,7 +17182,7 @@ class PyCPU:
 
         else:
             return False
-        
+
         mnemonic = instruction.mnemonic.upper()
         if mnemonic in self.emu.mnemonic_handlers:
             if op1valuederef != None and op2valuederef == None:
@@ -17189,7 +17191,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def SUB(self, instruction):
@@ -17208,7 +17210,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -17431,7 +17433,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-        
+
         #80 /5 ib SUB r/m8, imm8 Subtract imm8 from r/m8.
         elif instruction.opcode == 0x80 and instruction.extindex == 0x5:
 
@@ -17567,7 +17569,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def TEST(self, instruction):
@@ -17586,7 +17588,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -17683,7 +17685,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-        
+
         # A8 ib TEST AL, imm8  AND imm8 with AL; set SF, ZF, PF according to result.
         elif instruction.opcode == 0xa8:
 
@@ -17785,7 +17787,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
     def XCHG(self, instruction):
@@ -17804,7 +17806,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -17821,17 +17823,17 @@ class PyCPU:
                 if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register(op2.reg, osize)
-        
+
                     # Do logic
                     self.set_register(op1.reg, op2value, osize)
                     self.set_register(op2.reg, op1value, osize)
                 elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_memory_address(instruction, 2, asize)
-    
+
                     # Do logic
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     self.set_register(op1.reg, op2valuederef, osize)
                     self.set_memory(op2value, op1value, osize)
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -17840,7 +17842,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 self.set_memory(op1value, op2value, osize)
                 self.set_register(op2.reg, op1valuederef, osize)
 
@@ -17863,17 +17865,17 @@ class PyCPU:
                 if op2.type == pydasm.OPERAND_TYPE_REGISTER:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_register(op2.reg, osize)
-        
+
                     # Do logic
                     self.set_register(op1.reg, op2value, osize)
                     self.set_register(op2.reg, op1value, osize)
                 elif op2.type == pydasm.OPERAND_TYPE_MEMORY:
                     op1value = self.get_register(op1.reg, osize)
                     op2value = self.get_memory_address(instruction, 2, asize)
-    
+
                     # Do logic
                     op2valuederef = self.get_memory(op2value, osize)
-                    
+
                     self.set_register(op1.reg, op2valuederef, osize)
                     self.set_memory(op2value, op1value, osize)
             elif op1.type == pydasm.OPERAND_TYPE_MEMORY:
@@ -17882,7 +17884,7 @@ class PyCPU:
 
                 # Do logic
                 op1valuederef = self.get_memory(op1value, osize)
-                
+
                 self.set_memory(op1value, op2value, osize)
                 self.set_register(op2.reg, op1valuederef, osize)
 
@@ -17929,7 +17931,7 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
 
 
@@ -17949,7 +17951,7 @@ class PyCPU:
             asize = 2
         else:
             asize = 4
-            
+
         op1value = ""
         op2value = ""
         op3value = ""
@@ -18031,7 +18033,7 @@ class PyCPU:
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
 
-        #32 /r XOR r8,r/m8 
+        #32 /r XOR r8,r/m8
         elif instruction.opcode == 0x32:
             osize = 1
 
@@ -18188,7 +18190,7 @@ class PyCPU:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2valuederef, op3value)
                 else:
                     self.emu.opcode_handlers[opcode](self.emu, opcode, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         #81 /6 id XOR r/m32,imm32 r/m32  imm32
         #81 /6 iw XOR r/m16,imm16 r/m16  imm16
         elif instruction.opcode == 0x81 and instruction.extindex == 0x6:
@@ -18274,5 +18276,5 @@ class PyCPU:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2valuederef, op3value)
             else:
                 self.emu.mnemonic_handlers[mnemonic](self.emu, mnemonic, self.get_register32("EIP"), op1value, op2value, op3value)
-                
+
         return True
